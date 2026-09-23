@@ -197,17 +197,28 @@ export class AutoModelRouter {
       throw new Error("invalid_jev_classification");
     }
     const ranked = rankedProfiles(answer.distribution);
-    const primary = ranked[0];
+    if (answer.distribution !== undefined && ranked.length === 0) {
+      // A distribution was supplied but carries no usable profile. That is not
+      // the same as an absent distribution: rejecting it falls back instead of
+      // routing on the unverified Choice confidence.
+      throw new Error("invalid_jev_distribution");
+    }
+    const primary = ranked.find((entry) => entry.profile === answer.value);
+    if (!primary && ranked.length > 0) {
+      // The selected label is missing from a distribution that was supplied.
+      throw new Error("inconsistent_jev_classification");
+    }
     if (!primary) {
       return {
         profile: answer.value,
         confidence: answer.confidence,
-        reason: `Jev classified as ${answer.value} (confidence ${answer.confidence.toFixed(2)}, no usable distribution)`,
+        reason: `Jev classified as ${answer.value} (confidence ${answer.confidence.toFixed(2)}, no distribution)`,
       };
     }
-    if (primary.profile !== answer.value) {
-      // The selected label disagrees with the distribution's own ranking; such
-      // an answer is not trustworthy, so it must fall back rather than route.
+    if (primary.probability < ranked[0].probability) {
+      // The selected label is below the distribution's maximum probability;
+      // such an answer is not trustworthy, so it must fall back rather than
+      // route. Selections tied for the maximum are accepted.
       throw new Error("inconsistent_jev_classification");
     }
     if (primary.probability >= PROFILE_PROBABILITY_THRESHOLD) {

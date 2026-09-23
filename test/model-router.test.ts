@@ -394,7 +394,7 @@ test("splits the need when the top two combined probability is exactly 0.60", as
   assert.equal(requests[1].state.task.classified_need.secondary_profile, "long-context");
 });
 
-test("routes the top profile alone when the top two combined are just below 0.60", async () => {
+test("skips routing when the top two combined are just below 0.60", async () => {
   const ctx: any = { model: model("current"), modelRegistry: { getAvailable: () => [model("candidate")] }, getSystemPrompt: () => "" };
   let calls = 0;
   const jev: any = {
@@ -412,7 +412,78 @@ test("routes the top profile alone when the top two combined are just below 0.60
   assert.equal(result.profile, "reasoning");
   assert.equal(result.secondaryProfile, undefined);
   assert.match(result.reason, /top two 0\.59/);
+  assert.equal(result.skipped, "low-confidence", "combined 0.59 routes nothing");
   assert.equal(calls, 1, "no scoring without a split");
+});
+
+test("falls back when a distribution is present but empty", async () => {
+  const cheap = model("cheap", { reasoning: true, contextWindow: 1000000 });
+  const deep = model("deep", { reasoning: true, contextWindow: 200000 });
+  const ctx: any = { model: model("other"), modelRegistry: { getAvailable: () => [cheap, deep] }, getSystemPrompt: () => "" };
+  let calls = 0;
+  const jev: any = {
+    isConfigured: () => true,
+    evaluate: async () => {
+      calls++;
+      return { answers: { profile: { type: "choice", value: "fast", confidence: 0.9, distribution: {} } }, model: "jev-latest", elapsedMs: 1 };
+    },
+  };
+  const router = new AutoModelRouter({ setModel: async () => {} } as any, true, jev);
+  const result = await router.route("plan a safe migration", ctx);
+  assert.equal(result.profile, "long-context", "falls back to the local classification, not the unverified confidence");
+  assert.equal(result.model?.id, "cheap");
+  assert.match(result.reason, /heuristic scoring/);
+  assert.equal(calls, 1);
+});
+
+test("falls back when a distribution has only unknown profiles", async () => {
+  const cheap = model("cheap", { reasoning: true, contextWindow: 1000000 });
+  const deep = model("deep", { reasoning: true, contextWindow: 200000 });
+  const ctx: any = { model: model("other"), modelRegistry: { getAvailable: () => [cheap, deep] }, getSystemPrompt: () => "" };
+  let calls = 0;
+  const jev: any = {
+    isConfigured: () => true,
+    evaluate: async () => {
+      calls++;
+      return { answers: { profile: { type: "choice", value: "reasoning", confidence: 0.9, distribution: { ultra: 0.9 } } }, model: "jev-latest", elapsedMs: 1 };
+    },
+  };
+  const router = new AutoModelRouter({ setModel: async () => {} } as any, true, jev);
+  const result = await router.route("plan a safe migration", ctx);
+  assert.equal(result.profile, "long-context");
+  assert.equal(result.model?.id, "cheap");
+  assert.match(result.reason, /heuristic scoring/);
+  assert.equal(calls, 1);
+});
+
+test("a tie between the selected profile and another keeps split routing alive regardless of key order", async () => {
+  const deep = model("deep", { reasoning: true, contextWindow: 200000 });
+  const wide = model("wide", { contextWindow: 1000000 });
+  const ctx: any = { model: model("other"), modelRegistry: { getAvailable: () => [deep, wide] }, getSystemPrompt: () => "" };
+  const run = async (distribution: Record<string, number>) => {
+    const requests: any[] = [];
+    const jev: any = {
+      isConfigured: () => true,
+      evaluate: async (req: any) => {
+        requests.push(req);
+        if (req.questions.profile) {
+          return { answers: { profile: { type: "choice", value: "reasoning", confidence: 0.5, distribution } }, model: "jev-latest", elapsedMs: 1 };
+        }
+        return { answers: { fit_0: { type: "score", value: 2, confidence: 0.8 }, fit_1: { type: "score", value: 3, confidence: 0.8 } }, model: "jev-latest", elapsedMs: 1 };
+      },
+    };
+    const router = new AutoModelRouter({ setModel: async () => {} } as any, true, jev);
+    const result = await router.route("perform a full security review of this repo", ctx);
+    return { result, requests };
+  };
+  const first = await run({ fast: 0.5, reasoning: 0.5 });
+  const second = await run({ reasoning: 0.5, fast: 0.5 });
+  for (const { result, requests } of [first, second]) {
+    assert.equal(result.profile, "reasoning", "a tied selection is not rejected");
+    assert.equal(result.secondaryProfile, "fast");
+    assert.match(result.reason, /reasoning \+ fast \(combined probability 1\.00\)/);
+    assert.equal(requests.length, 2, "scoring runs for a tied split");
+  }
 });
 
 test("real JevClient normalization keeps missing score answers invalid", async () => {
