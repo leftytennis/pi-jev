@@ -106,15 +106,17 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("before_agent_start", async (event, ctx) => {
+    if (autoModel.enabled) {
+      const modelResult = await autoModel.route(event.prompt, ctx, { hasImages: Boolean(event.images?.length) });
+      if (modelResult.changed) {
+        ctx.ui.setStatus("jev", `jev: ${modelResult.profile} → ${modelResult.model?.id ?? "model"}`);
+      }
+    }
+
     if (!auto.enabled) return;
 
     if (agents.enabled && /\b(architecture|refactor|security review|entire repo|parallel|multiple agents|complex migration)\b/i.test(event.prompt)) {
       await agents.dispatch(event.prompt, ctx, true);
-    }
-
-    const modelResult = await autoModel.route(event.prompt, ctx, { hasImages: Boolean(event.images?.length) });
-    if (modelResult.changed) {
-      ctx.ui.setStatus("jev", `jev: ${modelResult.profile} → ${modelResult.model?.id ?? "model"}`);
     }
 
     const result = await auto.route(event.prompt, ctx, ctx.signal);
