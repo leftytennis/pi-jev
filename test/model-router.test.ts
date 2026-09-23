@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { classifyModelError, classifyModelNeed, AutoModelRouter } from "../src/model-router.js";
+import { JevClient } from "../src/jev.js";
 
 const model = (id: string, extra: Record<string, unknown> = {}) => ({
   id, provider: "test", name: id, api: "test", baseUrl: "", reasoning: false,
@@ -322,4 +323,119 @@ test("skips a low-confidence Jev classification without scoring candidates", asy
   assert.equal(result.profile, "balanced");
   assert.equal(result.skipped, "low-confidence");
   assert.equal(calls, 1);
+});
+
+test("falls back when the selected label is not the distribution's top probability", async () => {
+  // value:"fast" against balanced-on-top must not route fast+balanced together.
+  const cheap = model("cheap", { reasoning: true, contextWindow: 1000000 });
+  const deep = model("deep", { reasoning: true, contextWindow: 200000 });
+  const ctx: any = { model: model("other"), modelRegistry: { getAvailable: () => [cheap, deep] }, getSystemPrompt: () => "" };
+  let calls = 0;
+  const jev: any = {
+    isConfigured: () => true,
+    evaluate: async () => {
+      calls++;
+      return { answers: { profile: { type: "choice", value: "fast", confidence: 0.9, distribution: { fast: 0.1, balanced: 0.9 } } }, model: "jev-latest", elapsedMs: 1 };
+    },
+  };
+  const router = new AutoModelRouter({ setModel: async () => {} } as any, true, jev);
+  const result = await router.route("plan a safe migration", ctx);
+  assert.equal(result.profile, "long-context", "falls back to the local classification");
+  assert.equal(result.secondaryProfile, undefined, "an inconsistent answer never splits the need");
+  assert.equal(result.model?.id, "cheap");
+  assert.match(result.reason, /heuristic scoring/);
+  assert.equal(calls, 1);
+});
+
+test("falls back when a distribution probability is out of range", async () => {
+  const cheap = model("cheap", { reasoning: true, contextWindow: 1000000 });
+  const deep = model("deep", { reasoning: true, contextWindow: 200000 });
+  const ctx: any = { model: model("other"), modelRegistry: { getAvailable: () => [cheap, deep] }, getSystemPrompt: () => "" };
+  let calls = 0;
+  const jev: any = {
+    isConfigured: () => true,
+    evaluate: async () => {
+      calls++;
+      return { answers: { profile: { type: "choice", value: "reasoning", confidence: 0.9, distribution: { reasoning: 0.9, balanced: 1.4 } } }, model: "jev-latest", elapsedMs: 1 };
+    },
+  };
+  const router = new AutoModelRouter({ setModel: async () => {} } as any, true, jev);
+  const result = await router.route("plan a safe migration", ctx);
+  assert.equal(result.profile, "long-context");
+  assert.equal(result.model?.id, "cheap");
+  assert.match(result.reason, /heuristic scoring/);
+  assert.equal(calls, 1);
+});
+
+test("splits the need when the top two combined probability is exactly 0.60", async () => {
+  const deep = model("deep", { reasoning: true, contextWindow: 200000 });
+  const wide = model("wide", { contextWindow: 1000000 });
+  const ctx: any = { model: model("other"), modelRegistry: { getAvailable: () => [deep, wide] }, getSystemPrompt: () => "" };
+  const requests: any[] = [];
+  const jev: any = {
+    isConfigured: () => true,
+    evaluate: async (req: any) => {
+      requests.push(req);
+      if (req.questions.profile) {
+        return {
+          answers: { profile: { type: "choice", value: "reasoning", confidence: 0.42, distribution: { reasoning: 0.41, "long-context": 0.19, balanced: 0.18, fast: 0.12, vision: 0.1 } } },
+          model: "jev-latest", elapsedMs: 1,
+        };
+      }
+      return { answers: { fit_0: { type: "score", value: 2, confidence: 0.8 }, fit_1: { type: "score", value: 3, confidence: 0.8 } }, model: "jev-latest", elapsedMs: 1 };
+    },
+  };
+  const router = new AutoModelRouter({ setModel: async () => {} } as any, true, jev);
+  const result = await router.route("perform a full security review of this repo", ctx);
+  assert.equal(result.profile, "reasoning");
+  assert.equal(result.secondaryProfile, "long-context");
+  assert.match(result.reason, /combined probability 0\.60/);
+  assert.equal(requests.length, 2, "scoring runs for a split need");
+  assert.equal(requests[1].state.task.classified_need.secondary_profile, "long-context");
+});
+
+test("routes the top profile alone when the top two combined are just below 0.60", async () => {
+  const ctx: any = { model: model("current"), modelRegistry: { getAvailable: () => [model("candidate")] }, getSystemPrompt: () => "" };
+  let calls = 0;
+  const jev: any = {
+    isConfigured: () => true,
+    evaluate: async () => {
+      calls++;
+      return {
+        answers: { profile: { type: "choice", value: "reasoning", confidence: 0.42, distribution: { reasoning: 0.4, "long-context": 0.19, balanced: 0.18, fast: 0.13, vision: 0.1 } } },
+        model: "jev-latest", elapsedMs: 1,
+      };
+    },
+  };
+  const router = new AutoModelRouter({ setModel: async () => {} } as any, true, jev);
+  const result = await router.route("do the thing", ctx);
+  assert.equal(result.profile, "reasoning");
+  assert.equal(result.secondaryProfile, undefined);
+  assert.match(result.reason, /top two 0\.59/);
+  assert.equal(calls, 1, "no scoring without a split");
+});
+
+test("real JevClient normalization keeps missing score answers invalid", async () => {
+  const a = model("a", { reasoning: true, contextWindow: 1000000 });
+  const b = model("b", { reasoning: true, contextWindow: 200000 });
+  const pi: any = { setModel: async () => {} };
+  const ctx: any = { model: model("other"), modelRegistry: { getAvailable: () => [a, b] }, getSystemPrompt: () => "" };
+  const jev = new JevClient();
+  jev.setApiKey("test-key");
+  // Stub only the transport; request formatting and answer normalization run for real.
+  (jev as any).client = {
+    systemOne: async (req: any) => {
+      if (req.questions.profile) {
+        return { answers: { profile: { type: "choice", value: "reasoning", confidence: 0.9, probabilities: { reasoning: 0.9, balanced: 0.1 } } }, model: "jev-latest" };
+      }
+      // Raw answers with no score field at all, as a misbehaving backend might return.
+      return { answers: { fit_0: {}, fit_1: {} }, model: "jev-latest" };
+    },
+  };
+  const scored = await jev.evaluate({ state: {}, questions: { fit_0: { type: "score", instructions: "fit", criteria: ["worst", "best"] }, fit_1: { type: "score", instructions: "fit", criteria: ["worst", "best"] } } });
+  assert.equal(scored.answers.fit_0.value, undefined, "a missing score must not be normalized into 0");
+  const router = new AutoModelRouter(pi, true, jev);
+  const result = await router.route("plan a safe migration", ctx);
+  assert.equal(result.model?.id, "a", "falls back to heuristic scoring instead of picking fit_0 via a fake 0");
+  assert.match(result.reason, /heuristic scoring/);
 });

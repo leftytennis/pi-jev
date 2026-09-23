@@ -136,7 +136,9 @@ export class JevClient {
             raw: rawAns,
           };
         } else if (qConfig.type === "score") {
-          const s = (rawAns as any).score ?? (rawAns as any).value ?? 0;
+          // No `?? 0` fallback: a missing score must stay missing so consumers
+          // reject it as malformed instead of reading "worst fit" into silence.
+          const s = (rawAns as any).score ?? (rawAns as any).value;
           answers[id] = {
             type: "score",
             value: s,

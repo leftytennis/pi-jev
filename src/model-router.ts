@@ -105,13 +105,24 @@ function isModelProfile(value: unknown): value is ModelProfile {
   return typeof value === "string" && Object.hasOwn(MODEL_PROFILE_CRITERIA, value);
 }
 
-/** Profiles from a Choice distribution, highest probability first. Unknown keys and bad values are dropped. */
+/**
+ * Known profiles from a Choice distribution, highest probability first.
+ * Unknown keys are dropped, but a known entry whose probability is not a
+ * finite number in [0, 1] throws: a malformed distribution must fail the
+ * whole answer so the caller falls back, instead of routing on whatever
+ * entries survive.
+ */
 function rankedProfiles(distribution: unknown): { profile: ModelProfile; probability: number }[] {
   if (typeof distribution !== "object" || distribution === null) return [];
-  return Object.entries(distribution)
-    .flatMap(([profile, probability]) =>
-      isModelProfile(profile) && typeof probability === "number" && Number.isFinite(probability) ? [{ profile, probability }] : [])
-    .sort((a, b) => b.probability - a.probability);
+  const ranked: { profile: ModelProfile; probability: number }[] = [];
+  for (const [profile, probability] of Object.entries(distribution)) {
+    if (!isModelProfile(profile)) continue;
+    if (typeof probability !== "number" || !Number.isFinite(probability) || probability < 0 || probability > 1) {
+      throw new Error("invalid_jev_distribution");
+    }
+    ranked.push({ profile, probability });
+  }
+  return ranked.sort((a, b) => b.probability - a.probability);
 }
 
 const FIT_LEVELS = [
@@ -186,13 +197,18 @@ export class AutoModelRouter {
       throw new Error("invalid_jev_classification");
     }
     const ranked = rankedProfiles(answer.distribution);
-    const primary = ranked.find((entry) => entry.profile === answer.value);
+    const primary = ranked[0];
     if (!primary) {
       return {
         profile: answer.value,
         confidence: answer.confidence,
-        reason: `Jev classified as ${answer.value} (confidence ${answer.confidence.toFixed(2)}, no distribution)`,
+        reason: `Jev classified as ${answer.value} (confidence ${answer.confidence.toFixed(2)}, no usable distribution)`,
       };
+    }
+    if (primary.profile !== answer.value) {
+      // The selected label disagrees with the distribution's own ranking; such
+      // an answer is not trustworthy, so it must fall back rather than route.
+      throw new Error("inconsistent_jev_classification");
     }
     if (primary.probability >= PROFILE_PROBABILITY_THRESHOLD) {
       return {
