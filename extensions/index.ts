@@ -62,7 +62,7 @@ export default function (pi: ExtensionAPI) {
     skillRouter,
     Boolean(pi.getFlag("jev-auto"))
   );
-  const autoModel = new AutoModelRouter(pi, Boolean(pi.getFlag("jev-auto-model")));
+  const autoModel = new AutoModelRouter(pi, Boolean(pi.getFlag("jev-auto-model")), jevClient);
   const compactor = new JevCompactor(jevClient, Boolean(pi.getFlag("jev-compact")));
   const agents = new AgentOrchestrator(pi, jevClient, Boolean(pi.getFlag("jev-agents")));
   agents.installCompletionNotice();
