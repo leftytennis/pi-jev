@@ -16,10 +16,16 @@ export interface ModelRouteResult {
   skipped?: "disabled" | "busy" | "no-model" | "low-confidence" | "error";
 }
 
+// Recognizer wordings are deliberately narrow and fixture-backed
+// (test/fixtures/model-routing.json). Known traps: "analyze"/"diagnose" need
+// their full suffixes matched (a bare "analy[sz]" can never reach a word
+// boundary before the final "e"), "hi" needs a boundary or it matches
+// "history", and a standalone "context" matches far too much ("context
+// switching", "keep the context in mind") to signal a long-context task.
 const PROFILE_HINTS: Record<ModelProfile, RegExp> = {
-  fast: /^(hi|hello|list|rename|format|small|simple|quick|what is|how do i)/i,
-  reasoning: /\b(plan|planning|architect|architecture|debug|diagnos|compare|trade-?off|design|review|security|why|analy[sz]|complex|refactor)\b/i,
-  "long-context": /\b(full repo|entire repo|large diff|long document|all files|context|migration|codebase|many files)\b/i,
+  fast: /^(hi|hello|list|rename|format|small|simple|quick|what is|how do i)\b/i,
+  reasoning: /\b(plan|planning|architect|architecture|debug|diagnos\w*|compare|trade-?off|design|review|security|why|analy[sz]\w*|complex|refactor)\b/i,
+  "long-context": /\b(full repo|entire repo|large diff|long document|all files|context window|codebase|many files|migration)\b/i,
   vision: /\b(image|screenshot|photo|diagram|visual|picture|ui mockup|wireframe)\b/i,
   balanced: /.*/,
 };
@@ -31,6 +37,14 @@ interface ClassifiedNeed {
   reason: string;
 }
 
+/**
+ * Local fallback classifier. Its confidence values are hand-set evidence
+ * levels, not calibrated probabilities: `balanced` at 0.55 deliberately means
+ * "no distinguishing evidence" and falls below the routing threshold, so an
+ * unrecognized prompt keeps the user's current model instead of switching on
+ * a guess. Recalibrate only with fixture-backed evidence — never to make a
+ * particular sample route.
+ */
 export function classifyModelNeed(prompt: string, contextChars = 0, hasImages = false): ClassifiedNeed {
   if (hasImages || PROFILE_HINTS.vision.test(prompt)) return { profile: "vision", confidence: 0.95, reason: "image input or visual task" };
   if (contextChars > 120_000 || PROFILE_HINTS["long-context"].test(prompt)) return { profile: "long-context", confidence: 0.9, reason: "large context task" };
@@ -310,7 +324,11 @@ export class AutoModelRouter {
       if (!answer || answer.type !== "score" || typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > FIT_LEVELS.length - 1) {
         throw new Error("invalid_jev_score");
       }
-      scores.set(candidateKey(m), { score: value, confidence: typeof answer.confidence === "number" ? answer.confidence : 0 });
+      // Non-finite or out-of-range confidence is malformed; treat it as no signal.
+      const confidence = typeof answer.confidence === "number" && Number.isFinite(answer.confidence) && answer.confidence >= 0 && answer.confidence <= 1
+        ? answer.confidence
+        : 0;
+      scores.set(candidateKey(m), { score: value, confidence });
     });
     return scores;
   }
@@ -356,12 +374,21 @@ export class AutoModelRouter {
       }
       const classified = { profile: need.profile, secondaryProfile: need.secondaryProfile };
 
+      // Prune expired backoffs in the same pass, with one captured timestamp.
+      const now = Date.now();
+      for (const [key, until] of this.blocked) {
+        if (until <= now) this.blocked.delete(key);
+      }
       const pool = (ctx.scopedModels?.length ? ctx.scopedModels.map((x) => x.model) : ctx.modelRegistry.getAvailable())
-        .filter((model) => !this.blocked.get(`${model.provider}/${model.id}`) || (this.blocked.get(`${model.provider}/${model.id}`) ?? 0) < Date.now());
+        .filter((model) => {
+          const until = this.blocked.get(candidateKey(model));
+          return until === undefined || until < now;
+        });
       // Hard gate: a visual request is never routed to a text-only model.
       const capable = options.hasImages ? pool.filter((model) => model.input?.includes("image")) : pool;
       // Jev can score only a bounded question batch; prefilter oversized pools deterministically.
-      const heuristicRank = (a: Model<any>, b: Model<any>) => heuristicNeedScore(b, need, hasImages) - heuristicNeedScore(a, need, hasImages);
+      const heuristicRank = (a: Model<any>, b: Model<any>) =>
+        heuristicNeedScore(b, need, hasImages) - heuristicNeedScore(a, need, hasImages) || candidateKey(a).localeCompare(candidateKey(b));
       const eligible = capable.length > MAX_JEV_CANDIDATES ? [...capable].sort(heuristicRank).slice(0, MAX_JEV_CANDIDATES) : capable;
       if (!eligible.length) return { ...fallback, ...classified, reason: "no compatible model", skipped: "no-model" };
 
@@ -373,7 +400,7 @@ export class AutoModelRouter {
           target = [...eligible].sort((a, b) => {
             const sa = scores.get(candidateKey(a))!;
             const sb = scores.get(candidateKey(b))!;
-            return sb.score - sa.score || sb.confidence - sa.confidence;
+            return sb.score - sa.score || sb.confidence - sa.confidence || candidateKey(a).localeCompare(candidateKey(b));
           })[0];
           scorer = "jev";
         } catch {
