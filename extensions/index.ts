@@ -106,6 +106,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("before_agent_start", async (event, ctx) => {
+    let modelStatus: string | undefined;
     if (autoModel.enabled) {
       // Cancellation note: the host creates the agent run (and its abort signal)
       // only after this hook returns, so ctx.signal is typically undefined here.
@@ -114,7 +115,8 @@ export default function (pi: ExtensionAPI) {
       // internal timeout. True preflight cancellation needs host support.
       const modelResult = await autoModel.route(event.prompt, ctx, { hasImages: Boolean(event.images?.length), signal: ctx.signal });
       // Always reflect the outcome: a skip or failed switch must be visible, not silent.
-      ctx.ui.setStatus("jev", describeRouteStatus(modelResult));
+      modelStatus = describeRouteStatus(modelResult);
+      ctx.ui.setStatus("jev", modelStatus);
     }
 
     if (!auto.enabled) return;
@@ -127,7 +129,9 @@ export default function (pi: ExtensionAPI) {
     if (!result.ran) return;
 
     if (result.activated.length > 0) {
-      ctx.ui.setStatus("jev", `jev: auto (+${result.activated.length} tools)`);
+      // Compose with the model-routing status instead of overwriting the shared
+      // slot, so a routing failure or abstention stays visible when both run.
+      ctx.ui.setStatus("jev", modelStatus ? `${modelStatus} (+${result.activated.length} tools)` : `jev: auto (+${result.activated.length} tools)`);
     }
 
     if (result.skills.length === 0) return;
