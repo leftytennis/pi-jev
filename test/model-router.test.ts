@@ -568,3 +568,30 @@ test("describeRouteStatus explains unchanged and skipped outcomes", () => {
   assert.equal(describeRouteStatus({ changed: false, profile: "reasoning", model: model("cur"), reason: "model switch failed: auth", skipped: "error" }), "jev: reasoning · cur (error)");
   assert.equal(describeRouteStatus({ changed: false, profile: "balanced", reason: "model selection skipped", skipped: "disabled" }), "jev: balanced skipped: disabled");
 });
+
+test("aborts a pending Jev evaluation mid-flight without switching models", async () => {
+  const ctx: any = { model: model("current"), modelRegistry: { getAvailable: () => [model("a", { reasoning: true, contextWindow: 200000 })] }, getSystemPrompt: () => "" };
+  let switches = 0;
+  let evaluated = 0;
+  const pi: any = { setModel: async () => { switches++; return true; } };
+  const controller = new AbortController();
+  const jev: any = {
+    isConfigured: () => true,
+    evaluate: async (_req: any, signal: AbortSignal) => {
+      evaluated++;
+      // Pend exactly like an in-flight Jev request until the caller cancels it.
+      return new Promise((_resolve, reject) => {
+        signal.addEventListener("abort", () => reject(new Error("Request was aborted")));
+      });
+    },
+  };
+  const router = new AutoModelRouter(pi, true, jev);
+  const pending = router.route("plan a safe migration", ctx, { signal: controller.signal });
+  controller.abort();
+  const result = await pending;
+  assert.equal(evaluated, 1, "cancellation reaches the in-flight Jev request");
+  assert.equal(result.changed, false);
+  assert.equal(result.skipped, "error");
+  assert.equal(switches, 0, "mid-flight cancellation never switches models");
+  assert.equal(router.last, result);
+});
