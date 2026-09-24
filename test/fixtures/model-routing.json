@@ -1,0 +1,23 @@
+[
+  { "id": "reasoning-plan-security", "prompt": "plan a security decision", "expectProfile": "reasoning" },
+  { "id": "reasoning-analyze", "prompt": "analyze the failure", "expectProfile": "reasoning" },
+  { "id": "reasoning-analyse", "prompt": "analyse why the request timed out", "expectProfile": "reasoning" },
+  { "id": "reasoning-diagnose", "prompt": "diagnose why the build fails", "expectProfile": "reasoning" },
+  { "id": "reasoning-diagnosis", "prompt": "a diagnosis of this stack trace", "expectProfile": "reasoning" },
+  { "id": "reasoning-architect", "prompt": "architect a caching layer", "expectProfile": "reasoning" },
+  { "id": "reasoning-tradeoff", "prompt": "compare these two trade-off options", "expectProfile": "reasoning" },
+  { "id": "longcontext-entire-repo", "prompt": "review this diff across the entire repo before the migration", "expectProfile": "long-context" },
+  { "id": "longcontext-codebase", "prompt": "review the entire codebase", "expectProfile": "long-context" },
+  { "id": "longcontext-document", "prompt": "summarize this long document", "expectProfile": "long-context" },
+  { "id": "longcontext-context-window", "prompt": "will this fit in your context window", "expectProfile": "long-context" },
+  { "id": "longcontext-context-chars", "prompt": "summarize the attached material", "contextChars": 150000, "expectProfile": "long-context" },
+  { "id": "vision-screenshot", "prompt": "describe what is wrong in this screenshot", "expectProfile": "vision" },
+  { "id": "vision-hasimages", "prompt": "what does this show", "hasImages": true, "expectProfile": "vision" },
+  { "id": "fast-hi-list", "prompt": "hi, list the files in src", "expectProfile": "fast" },
+  { "id": "fast-what-is", "prompt": "what is 2+2", "expectProfile": "fast" },
+  { "id": "fast-rename", "prompt": "rename this variable", "expectProfile": "fast" },
+  { "id": "balanced-history", "prompt": "history of bicycles", "expectProfile": "balanced" },
+  { "id": "balanced-context-switching", "prompt": "explain context switching", "expectProfile": "balanced" },
+  { "id": "balanced-keep-context", "prompt": "keep the context in mind", "expectProfile": "balanced" },
+  { "id": "balanced-overview", "prompt": "Give me a considered overview of the history and cultural impact of the bicycle.", "expectProfile": "balanced" }
+]

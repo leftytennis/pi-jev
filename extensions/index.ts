@@ -5,7 +5,7 @@ import { SkillRouter } from "../src/skills.js";
 import { AutoJev } from "../src/auto.js";
 import { registerJevTools } from "../src/tools.js";
 import { registerJevCommands } from "../src/commands.js";
-import { AutoModelRouter } from "../src/model-router.js";
+import { AutoModelRouter, describeRouteStatus } from "../src/model-router.js";
 import { JevCompactor } from "../src/compact.js";
 import { AgentOrchestrator } from "../src/orchestrator.js";
 import { JevAgentHandler } from "../src/agent.js";
@@ -62,7 +62,7 @@ export default function (pi: ExtensionAPI) {
     skillRouter,
     Boolean(pi.getFlag("jev-auto"))
   );
-  const autoModel = new AutoModelRouter(pi, Boolean(pi.getFlag("jev-auto-model")));
+  const autoModel = new AutoModelRouter(pi, Boolean(pi.getFlag("jev-auto-model")), jevClient);
   const compactor = new JevCompactor(jevClient, Boolean(pi.getFlag("jev-compact")));
   const agents = new AgentOrchestrator(pi, jevClient, Boolean(pi.getFlag("jev-agents")));
   agents.installCompletionNotice();
@@ -106,22 +106,32 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("before_agent_start", async (event, ctx) => {
+    let modelStatus: string | undefined;
+    if (autoModel.enabled) {
+      // Cancellation note: the host creates the agent run (and its abort signal)
+      // only after this hook returns, so ctx.signal is typically undefined here.
+      // It is wired regardless so the router honors cancellation wherever a live
+      // signal exists; preflight routing is otherwise bounded by the router's
+      // internal timeout. True preflight cancellation needs host support.
+      const modelResult = await autoModel.route(event.prompt, ctx, { hasImages: Boolean(event.images?.length), signal: ctx.signal });
+      // Always reflect the outcome: a skip or failed switch must be visible, not silent.
+      modelStatus = describeRouteStatus(modelResult);
+      ctx.ui.setStatus("jev", modelStatus);
+    }
+
     if (!auto.enabled) return;
 
     if (agents.enabled && /\b(architecture|refactor|security review|entire repo|parallel|multiple agents|complex migration)\b/i.test(event.prompt)) {
       await agents.dispatch(event.prompt, ctx, true);
     }
 
-    const modelResult = await autoModel.route(event.prompt, ctx, { hasImages: Boolean(event.images?.length) });
-    if (modelResult.changed) {
-      ctx.ui.setStatus("jev", `jev: ${modelResult.profile} → ${modelResult.model?.id ?? "model"}`);
-    }
-
     const result = await auto.route(event.prompt, ctx, ctx.signal);
     if (!result.ran) return;
 
     if (result.activated.length > 0) {
-      ctx.ui.setStatus("jev", `jev: auto (+${result.activated.length} tools)`);
+      // Compose with the model-routing status instead of overwriting the shared
+      // slot, so a routing failure or abstention stays visible when both run.
+      ctx.ui.setStatus("jev", modelStatus ? `${modelStatus} (+${result.activated.length} tools)` : `jev: auto (+${result.activated.length} tools)`);
     }
 
     if (result.skills.length === 0) return;
