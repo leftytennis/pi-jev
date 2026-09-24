@@ -125,6 +125,14 @@ function rankedProfiles(distribution: unknown): { profile: ModelProfile; probabi
   return ranked.sort((a, b) => b.probability - a.probability);
 }
 
+/** Compact status-line text for a routing outcome, including why nothing changed. */
+export function describeRouteStatus(result: ModelRouteResult): string {
+  if (result.changed) return `jev: ${result.profile} → ${result.model?.id ?? "model"}`;
+  const id = result.model?.id;
+  if (result.skipped) return id ? `jev: ${result.profile} · ${id} (${result.skipped})` : `jev: ${result.profile} skipped: ${result.skipped}`;
+  return id ? `jev: ${result.profile} · ${id} (current)` : `jev: ${result.profile}`;
+}
+
 const FIT_LEVELS = [
   "Cannot satisfy the need: it lacks a hard requirement (for example no image input for a visual task, or a context window far too small for the material)",
   "Poor fit: technically usable but likely to struggle with the dominant demand of the need",
@@ -151,9 +159,13 @@ export class AutoModelRouter {
     if (!model || status < 400) return undefined;
     const kind: ModelErrorKind = status === 408 || status === 504 ? "timeout" : status === 401 || status === 403 ? "auth" : status === 413 ? "context-limit" : status === 429 ? "rate-limit" : status === 402 ? "quota" : status >= 500 ? "unavailable" : "unknown";
     if (["quota", "rate-limit", "context-limit", "unavailable", "timeout"].includes(kind)) {
-      this.blocked.set(`${model.provider}/${model.id}`, Date.now() + (kind === "quota" || kind === "rate-limit" ? 600_000 : 60_000));
+      this.setBackoff(model, kind);
     }
     return kind;
+  }
+
+  private setBackoff(model: Model<any>, kind: ModelErrorKind): void {
+    this.blocked.set(candidateKey(model), Date.now() + (kind === "rate-limit" || kind === "quota" ? 600_000 : 60_000));
   }
 
   /**
@@ -303,12 +315,20 @@ export class AutoModelRouter {
     return scores;
   }
 
+  /** Every routing outcome — including skips and failures — is recorded here for inspection. */
   public async route(prompt: string, ctx: ExtensionContext, options: { hasImages?: boolean; signal?: AbortSignal } = {}): Promise<ModelRouteResult> {
+    const result = await this.routeOnce(prompt, ctx, options);
+    this.last = result;
+    return result;
+  }
+
+  private async routeOnce(prompt: string, ctx: ExtensionContext, options: { hasImages?: boolean; signal?: AbortSignal } = {}): Promise<ModelRouteResult> {
     const current = ctx.model;
     const fallback: ModelRouteResult = { changed: false, profile: "balanced", reason: "model selection skipped" };
     if (!this.enabled) return { ...fallback, skipped: "disabled" };
     if (this.running) return { ...fallback, skipped: "busy" };
     if (!prompt.trim()) return { ...fallback, skipped: "low-confidence" };
+    if (options.signal?.aborted) return { ...fallback, skipped: "error" };
 
     this.running = true;
     try {
@@ -365,12 +385,19 @@ export class AutoModelRouter {
       const reason = `${need.reason} (${scorer} scoring)`;
       if (current?.provider === target.provider && current?.id === target.id) return { changed: false, ...classified, model: target, reason };
 
+      if (options.signal?.aborted) return { changed: false, ...classified, model: current, reason, skipped: "error" };
+
       try {
-        await this.pi.setModel(target);
+        const switched = await this.pi.setModel(target);
+        if (switched === false) {
+          // The SDK reports exactly false when the target provider has no configured auth.
+          this.setBackoff(target, "auth");
+          return { changed: false, ...classified, model: current, reason: "model switch failed: auth", skipped: "error" };
+        }
         return { changed: true, ...classified, model: target, reason };
       } catch (error) {
         const kind = classifyModelError(error);
-        this.blocked.set(`${target.provider}/${target.id}`, Date.now() + (kind === "rate-limit" || kind === "quota" ? 600_000 : 60_000));
+        this.setBackoff(target, kind);
         return { changed: false, ...classified, model: current, reason: `model switch failed: ${kind}`, skipped: "error" };
       }
     } catch {

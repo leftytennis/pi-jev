@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { classifyModelError, classifyModelNeed, AutoModelRouter } from "../src/model-router.js";
+import { classifyModelError, classifyModelNeed, AutoModelRouter, describeRouteStatus } from "../src/model-router.js";
 import { JevClient } from "../src/jev.js";
 
 const model = (id: string, extra: Record<string, unknown> = {}) => ({
@@ -509,4 +509,62 @@ test("real JevClient normalization keeps missing score answers invalid", async (
   const result = await router.route("plan a safe migration", ctx);
   assert.equal(result.model?.id, "a", "falls back to heuristic scoring instead of picking fit_0 via a fake 0");
   assert.match(result.reason, /heuristic scoring/);
+});
+
+test("reports a failed switch when setModel returns false", async () => {
+  const cheap = model("cheap", { reasoning: true });
+  const strong = model("strong", { reasoning: true, contextWindow: 200000 });
+  const pi: any = { setModel: async () => false };
+  const ctx: any = { model: model("other"), modelRegistry: { getAvailable: () => [cheap, strong] }, getSystemPrompt: () => "" };
+  const router = new AutoModelRouter(pi, true);
+  const result = await router.route("plan a safe migration", ctx);
+  assert.equal(result.changed, false, "a false setModel result is not a successful switch");
+  assert.equal(result.skipped, "error");
+  assert.match(result.reason, /model switch failed: auth/);
+  assert.equal(router.last, result, "the outcome is recorded on router.last");
+  // The failed target is backed off, so the next prompt does not retry it.
+  ctx.model = cheap;
+  const next = await router.route("plan a safe migration", ctx);
+  assert.equal(next.model?.id, "cheap");
+  assert.equal(next.changed, false);
+  assert.equal(next.reason, "large context task (heuristic scoring)", "falls back to the remaining eligible model");
+});
+
+test("records every routing outcome on router.last", async () => {
+  const pi: any = { setModel: async () => {} };
+  const router = new AutoModelRouter(pi, false);
+  const ctx: any = { model: model("a"), modelRegistry: { getAvailable: () => [model("a"), model("b", { reasoning: true, contextWindow: 200000 })] }, getSystemPrompt: () => "" };
+  const disabled = await router.route("plan a safe migration", ctx);
+  assert.equal(disabled.skipped, "disabled");
+  assert.equal(router.last, disabled);
+
+  router.setEnabled(true);
+  const switched = await router.route("plan a safe migration", ctx);
+  assert.equal(switched.changed, true, "switches to the better model once enabled");
+  assert.equal(router.last, switched);
+
+  const empty = await router.route("   ", ctx);
+  assert.equal(empty.skipped, "low-confidence");
+  assert.equal(router.last, empty);
+});
+
+test("aborts without switching models when the signal is already aborted", async () => {
+  const ctx: any = { model: model("current"), modelRegistry: { getAvailable: () => [model("a", { reasoning: true, contextWindow: 200000 })] }, getSystemPrompt: () => "" };
+  let switches = 0;
+  const pi: any = { setModel: async () => { switches++; return true; } };
+  const router = new AutoModelRouter(pi, true);
+  const controller = new AbortController();
+  controller.abort();
+  const result = await router.route("plan a safe migration", ctx, { signal: controller.signal });
+  assert.equal(result.changed, false);
+  assert.equal(result.skipped, "error");
+  assert.equal(switches, 0, "no model switch on an aborted turn");
+});
+
+test("describeRouteStatus explains unchanged and skipped outcomes", () => {
+  assert.equal(describeRouteStatus({ changed: true, profile: "reasoning", model: model("deep"), reason: "" }), "jev: reasoning → deep");
+  assert.equal(describeRouteStatus({ changed: false, profile: "balanced", model: model("same"), reason: "" }), "jev: balanced · same (current)");
+  assert.equal(describeRouteStatus({ changed: false, profile: "reasoning", reason: "model selection skipped", skipped: "low-confidence" }), "jev: reasoning skipped: low-confidence");
+  assert.equal(describeRouteStatus({ changed: false, profile: "reasoning", model: model("cur"), reason: "model switch failed: auth", skipped: "error" }), "jev: reasoning · cur (error)");
+  assert.equal(describeRouteStatus({ changed: false, profile: "balanced", reason: "model selection skipped", skipped: "disabled" }), "jev: balanced skipped: disabled");
 });
