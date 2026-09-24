@@ -5,7 +5,7 @@ import { SkillRouter } from "../src/skills.js";
 import { AutoJev } from "../src/auto.js";
 import { registerJevTools } from "../src/tools.js";
 import { registerJevCommands } from "../src/commands.js";
-import { AutoModelRouter } from "../src/model-router.js";
+import { AutoModelRouter, describeRouteStatus } from "../src/model-router.js";
 import { JevCompactor } from "../src/compact.js";
 import { AgentOrchestrator } from "../src/orchestrator.js";
 import { JevAgentHandler } from "../src/agent.js";
@@ -107,10 +107,9 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("before_agent_start", async (event, ctx) => {
     if (autoModel.enabled) {
-      const modelResult = await autoModel.route(event.prompt, ctx, { hasImages: Boolean(event.images?.length) });
-      if (modelResult.changed) {
-        ctx.ui.setStatus("jev", `jev: ${modelResult.profile} → ${modelResult.model?.id ?? "model"}`);
-      }
+      const modelResult = await autoModel.route(event.prompt, ctx, { hasImages: Boolean(event.images?.length), signal: ctx.signal });
+      // Always reflect the outcome: a skip or failed switch must be visible, not silent.
+      ctx.ui.setStatus("jev", describeRouteStatus(modelResult));
     }
 
     if (!auto.enabled) return;
