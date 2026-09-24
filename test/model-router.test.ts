@@ -595,3 +595,62 @@ test("aborts a pending Jev evaluation mid-flight without switching models", asyn
   assert.equal(switches, 0, "mid-flight cancellation never switches models");
   assert.equal(router.last, result);
 });
+
+test("heuristic-only routing abstains on unrecognized prompts by design", async () => {
+  // "balanced 0.55" means "no distinguishing evidence": below the threshold the
+  // router keeps the user's current model rather than switching on a guess.
+  const ctx: any = { model: model("current"), modelRegistry: { getAvailable: () => [model("candidate")] }, getSystemPrompt: () => "" };
+  let switches = 0;
+  const router = new AutoModelRouter({ setModel: async () => { switches++; } } as any, true);
+  const result = await router.route("tell me something about octopuses", ctx);
+  assert.equal(result.profile, "balanced");
+  assert.equal(result.skipped, "low-confidence");
+  assert.equal(switches, 0, "no-evidence prompts never switch models");
+});
+
+test("selection is independent of registry order for equal scores", async () => {
+  const a = model("a", { reasoning: true, contextWindow: 200000 });
+  const b = model("b", { reasoning: true, contextWindow: 200000 });
+  const routeOnce = async (order: any[]) => {
+    const ctx: any = { model: model("other"), modelRegistry: { getAvailable: () => order }, getSystemPrompt: () => "" };
+    const jev: any = {
+      isConfigured: () => true,
+      evaluate: async (req: any) => req.questions.profile
+        ? { answers: { profile: { type: "choice", value: "reasoning", confidence: 0.9 } }, model: "jev-latest", elapsedMs: 1 }
+        // Exact ties on both score and confidence for every candidate.
+        : { answers: Object.fromEntries(Object.keys(req.questions).map((q) => [q, { type: "score", value: 3, confidence: 0.8 }])), model: "jev-latest", elapsedMs: 1 },
+    };
+    const router = new AutoModelRouter({ setModel: async () => {} } as any, true, jev);
+    return (await router.route("plan a safe migration", ctx)).model?.id;
+  };
+  const first = await routeOnce([a, b]);
+  const second = await routeOnce([b, a]);
+  assert.equal(first, second, "registry order must not decide exact ties");
+  assert.equal(first, "a", "stable candidateKey tiebreak wins");
+});
+
+test("malformed score confidence degrades to zero instead of corrupting the comparator", async () => {
+  const a = model("a", { reasoning: true, contextWindow: 200000 });
+  const b = model("b", { reasoning: true, contextWindow: 1000000 });
+  const ctx: any = { model: model("other"), modelRegistry: { getAvailable: () => [a, b] }, getSystemPrompt: () => "" };
+  const jev: any = {
+    isConfigured: () => true,
+    evaluate: async (req: any) => req.questions.profile
+      ? { answers: { profile: { type: "choice", value: "long-context", confidence: 0.9 } }, model: "jev-latest", elapsedMs: 1 }
+      // Equal scores; a carries a valid confidence while b's is NaN (degrades to 0), so a must win the tiebreak.
+      : { answers: { fit_0: { type: "score", value: 3, confidence: 0.8 }, fit_1: { type: "score", value: 3, confidence: NaN } }, model: "jev-latest", elapsedMs: 1 },
+  };
+  const router = new AutoModelRouter({ setModel: async () => {} } as any, true, jev);
+  const result = await router.route("review the entire codebase", ctx);
+  assert.equal(result.model?.id, "a", "NaN confidences compare as zero, not as garbage");
+});
+
+test("expired backoff entries are pruned and their models become eligible again", async () => {
+  const a = model("a");
+  const ctx: any = { model: model("other"), modelRegistry: { getAvailable: () => [a] }, getSystemPrompt: () => "" };
+  const router = new AutoModelRouter({ setModel: async () => {} } as any, true);
+  (router as any).blocked.set("test/a", Date.now() - 1);
+  const result = await router.route("hi, list the files in src", ctx);
+  assert.equal(result.model?.id, "a", "an expired backoff no longer excludes the model");
+  assert.equal((router as any).blocked.size, 0, "expired entries are pruned from the map");
+});
