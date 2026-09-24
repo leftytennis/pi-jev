@@ -107,6 +107,11 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("before_agent_start", async (event, ctx) => {
     if (autoModel.enabled) {
+      // Cancellation note: the host creates the agent run (and its abort signal)
+      // only after this hook returns, so ctx.signal is typically undefined here.
+      // It is wired regardless so the router honors cancellation wherever a live
+      // signal exists; preflight routing is otherwise bounded by the router's
+      // internal timeout. True preflight cancellation needs host support.
       const modelResult = await autoModel.route(event.prompt, ctx, { hasImages: Boolean(event.images?.length), signal: ctx.signal });
       // Always reflect the outcome: a skip or failed switch must be visible, not silent.
       ctx.ui.setStatus("jev", describeRouteStatus(modelResult));
