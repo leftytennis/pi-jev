@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { classifyModelError, classifyModelNeed, AutoModelRouter, describeRouteStatus } from "../src/model-router.js";
+import { classifyModelError, classifyModelNeed, AutoModelRouter, describeRouteStatus, parseDurationMs, parseResetHeader, quotaWindowFor, DEFAULT_QUOTA_WINDOW_MS } from "../src/model-router.js";
 import { JevClient } from "../src/jev.js";
 
 const model = (id: string, extra: Record<string, unknown> = {}) => ({
@@ -45,6 +45,67 @@ test("blocks quota model for future fallback", () => {
   const current = model("quota-model");
   const router = new AutoModelRouter({ setModel: async () => {} } as any, true);
   assert.equal(router.recordProviderResponse(429, current), "rate-limit");
+});
+
+test("parses duration strings for quota windows", () => {
+  assert.equal(parseDurationMs("45s"), 45_000);
+  assert.equal(parseDurationMs("30m"), 1_800_000);
+  assert.equal(parseDurationMs("5h"), 18_000_000);
+  assert.equal(parseDurationMs("7d"), 604_800_000);
+  assert.equal(parseDurationMs("5"), undefined);
+  assert.equal(parseDurationMs("hours"), undefined);
+  assert.equal(parseDurationMs(undefined), undefined);
+});
+
+test("quota windows come from env overrides, provider defaults, then the generic window", () => {
+  assert.equal(quotaWindowFor("openai-codex"), 5 * 60 * 60 * 1000);
+  assert.equal(quotaWindowFor("totally-unknown"), DEFAULT_QUOTA_WINDOW_MS);
+  const env = { PI_JEV_QUOTA_WINDOW: "45m", PI_JEV_QUOTA_WINDOW_OPENAI_CODEX: "2h" };
+  assert.equal(quotaWindowFor("openai-codex", env), 2 * 60 * 60 * 1000);
+  assert.equal(quotaWindowFor("claude-bridge", env), 45 * 60 * 1000);
+});
+
+test("parses provider-reported reset times", () => {
+  const now = Date.parse("2026-03-02T10:00:00Z");
+  assert.equal(parseResetHeader("30", now), now + 30_000);
+  assert.equal(parseResetHeader("1780000000", now), 1_780_000_000_000);
+  assert.equal(parseResetHeader("1780000000000", now), 1_780_000_000_000);
+  assert.equal(parseResetHeader("2026-03-02T11:00:00Z", now), now + 3_600_000);
+  assert.equal(parseResetHeader("Mon, 02 Mar 2026 11:00:00 GMT", now), now + 3_600_000);
+  assert.equal(parseResetHeader("soon", now), undefined);
+  assert.equal(parseResetHeader(undefined, now), undefined);
+});
+
+test("usage limits back off until the reported reset or the next quota window", () => {
+  const router = new AutoModelRouter({ setModel: async () => {} } as any, true);
+  const before = Date.now();
+
+  // A provider-reported reset wins: Retry-After of 30 seconds.
+  const codex = model("codex", { provider: "openai-codex" });
+  assert.equal(router.recordProviderResponse(429, codex, { "Retry-After": "30" }), "rate-limit");
+  const reported = router.blockedUntil(codex)!;
+  assert.ok(reported >= before + 29_000 && reported <= before + 31_500, `reported reset ${reported}`);
+
+  // No reset header: the provider's default window, openai-codex = 5 hours.
+  const codexQuiet = model("codex-quiet", { provider: "openai-codex" });
+  assert.equal(router.recordProviderResponse(402, codexQuiet), "quota");
+  const windowed = router.blockedUntil(codexQuiet)!;
+  assert.ok(windowed >= before + 5 * 3_600_000 - 1_000, `window backoff ${windowed}`);
+
+  // An absurd reset is capped so a model cannot be parked for good.
+  const absurd = model("absurd");
+  router.recordProviderResponse(429, absurd, { "x-ratelimit-reset": String(before + 30 * 24 * 3_600_000) });
+  const capped = router.blockedUntil(absurd)!;
+  assert.ok(capped <= before + 7 * 24 * 3_600_000 + 1_000, `capped backoff ${capped}`);
+
+  // Non-usage failures keep the short backoff.
+  const flaky = model("flaky");
+  router.recordProviderResponse(503, flaky);
+  const short = router.blockedUntil(flaky)!;
+  assert.ok(short >= before + 59_000 && short <= before + 61_500, `short backoff ${short}`);
+
+  // A model that is not blocked reports no reset time.
+  assert.equal(router.blockedUntil(model("never-hit")), undefined);
 });
 
 test("scores candidates with jev when configured", async () => {

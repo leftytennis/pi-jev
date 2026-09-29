@@ -101,8 +101,13 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("after_provider_response", (event, ctx) => {
-    const kind = autoModel.recordProviderResponse(event.status, ctx.model);
-    if (kind) ctx.ui.setStatus("jev", `jev: ${kind} → fallback next prompt`);
+    const kind = autoModel.recordProviderResponse(event.status, ctx.model, event.headers);
+    if (!kind) return;
+    const until = ctx.model ? autoModel.blockedUntil(ctx.model) : undefined;
+    const detail = until
+      ? `fallback until ${new Date(until).toLocaleTimeString()}`
+      : "fallback next prompt";
+    ctx.ui.setStatus("jev", `jev: ${kind} → ${detail}`);
   });
 
   pi.on("before_agent_start", async (event, ctx) => {
