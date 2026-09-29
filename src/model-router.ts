@@ -13,7 +13,7 @@ export interface ModelRouteResult {
   secondaryProfile?: ModelProfile;
   model?: Model<any>;
   reason: string;
-  skipped?: "disabled" | "busy" | "no-model" | "low-confidence" | "error";
+  skipped?: "disabled" | "busy" | "no-model" | "low-confidence" | "error" | "subagent-session";
 }
 
 // Recognizer wordings are deliberately narrow and fixture-backed
@@ -426,6 +426,13 @@ export class AutoModelRouter {
     const fallback: ModelRouteResult = { changed: false, profile: "balanced", reason: "model selection skipped" };
     if (!this.enabled) return { ...fallback, skipped: "disabled" };
     if (this.running) return { ...fallback, skipped: "busy" };
+    // Subagent children are launched with an explicit model contract —
+    // pi-subagents names their sessions "subagent-<agent>-<run>-<n>" and
+    // verifies the reported model against the launch candidate. Rerouting
+    // here would silently replace the requested model and trip that
+    // verification, so routing abstains in those sessions entirely.
+    const sessionName = ctx.sessionManager?.getSessionName?.();
+    if (sessionName?.startsWith("subagent-")) return { ...fallback, skipped: "subagent-session" };
     if (!prompt.trim()) return { ...fallback, skipped: "low-confidence" };
     if (options.signal?.aborted) return { ...fallback, skipped: "error" };
 
