@@ -90,6 +90,71 @@ const JEV_TIMEOUT_MS = 10_000;
 const MAX_JEV_CANDIDATES = 24;
 const MAX_TASK_CHARS = 4_000;
 
+/** Hard cap on any backoff, so a bogus reset header cannot park a model for good. */
+const MAX_BACKOFF_MS = 7 * 24 * 60 * 60 * 1000;
+/** Usage-limit backoff when the provider reports no reset time: assume a full
+ * quota window restarts now. Subscription bridges typically use 5-hour
+ * windows; everything else falls back to the generic one-hour window. */
+export const DEFAULT_QUOTA_WINDOW_MS = 60 * 60 * 1000;
+const PROVIDER_QUOTA_WINDOWS_MS: Record<string, number> = {
+  "openai-codex": 5 * 60 * 60 * 1000,
+  "claude-bridge": 5 * 60 * 60 * 1000,
+  anthropic: 5 * 60 * 60 * 1000,
+  openai: 5 * 60 * 60 * 1000,
+};
+
+/** Parse a human duration such as "45s", "30m", "5h", or "7d". */
+export function parseDurationMs(value: string | undefined): number | undefined {
+  if (!value) return undefined;
+  const match = /^(\d+)([smhd])$/.exec(value.trim().toLowerCase());
+  if (!match) return undefined;
+  const amount = Number(match[1]);
+  const unitMs = { s: 1_000, m: 60_000, h: 3_600_000, d: 86_400_000 }[match[2] as "s" | "m" | "h" | "d"];
+  const ms = amount * unitMs;
+  return Number.isFinite(ms) && ms > 0 ? ms : undefined;
+}
+
+/** The configured quota window for one provider, in milliseconds. */
+export function quotaWindowFor(provider: string, env: Record<string, string | undefined> = process.env): number {
+  const envKey = `PI_JEV_QUOTA_WINDOW_${provider.toUpperCase().replace(/[^A-Z0-9]/g, "_")}`;
+  const configured = parseDurationMs(env[envKey]) ?? parseDurationMs(env.PI_JEV_QUOTA_WINDOW);
+  if (configured !== undefined) return configured;
+  return PROVIDER_QUOTA_WINDOWS_MS[provider] ?? DEFAULT_QUOTA_WINDOW_MS;
+}
+
+/**
+ * Read a provider-reported usage-limit reset into an absolute timestamp.
+ * Accepts delta seconds ("30"), epoch seconds, epoch milliseconds, an RFC 3339
+ * timestamp, or an HTTP date. Returns undefined when nothing parses.
+ */
+export function parseResetHeader(value: string | undefined, now: number): number | undefined {
+  if (!value) return undefined;
+  const trimmed = value.trim();
+  if (/^\d+$/.test(trimmed)) {
+    const numeric = Number(trimmed);
+    if (numeric < 1e8) return now + numeric * 1_000; // delta seconds
+    if (numeric < 1e11) return numeric * 1_000; // epoch seconds
+    return numeric; // epoch milliseconds
+  }
+  const parsed = Date.parse(trimmed);
+  return Number.isNaN(parsed) ? undefined : parsed;
+}
+
+/**
+ * First provider-reported reset time in the response headers, if any.
+ * Covers Retry-After and the common ratelimit reset headers (OpenAI-style
+ * x-ratelimit-reset, Anthropic's unified-limit reset timestamp).
+ */
+export function reportedResetMs(headers: Record<string, string> | undefined, now: number): number | undefined {
+  if (!headers) return undefined;
+  const lowered = new Map(Object.entries(headers).map(([key, value]) => [key.toLowerCase(), value]));
+  for (const name of ["retry-after", "x-ratelimit-reset", "anthropic-ratelimit-unified-reset"]) {
+    const until = parseResetHeader(lowered.get(name), now);
+    if (until !== undefined) return until;
+  }
+  return undefined;
+}
+
 const PROFILE_GUIDANCE: Record<ModelProfile, string> = {
   vision: "The request involves images or visual content. Image input capability is mandatory; quality of visual understanding matters most.",
   "long-context": "The request requires holding a very large amount of material at once. A large context window is the dominant need.",
@@ -169,17 +234,33 @@ export class AutoModelRouter {
 
   public setEnabled(enabled: boolean): void { this.enabled = enabled; }
 
-  public recordProviderResponse(status: number, model?: Model<any>): ModelErrorKind | undefined {
+  public recordProviderResponse(status: number, model?: Model<any>, headers?: Record<string, string>): ModelErrorKind | undefined {
     if (!model || status < 400) return undefined;
     const kind: ModelErrorKind = status === 408 || status === 504 ? "timeout" : status === 401 || status === 403 ? "auth" : status === 413 ? "context-limit" : status === 429 ? "rate-limit" : status === 402 ? "quota" : status >= 500 ? "unavailable" : "unknown";
     if (["quota", "rate-limit", "context-limit", "unavailable", "timeout"].includes(kind)) {
-      this.setBackoff(model, kind);
+      this.setBackoff(model, kind, headers);
     }
     return kind;
   }
 
-  private setBackoff(model: Model<any>, kind: ModelErrorKind): void {
-    this.blocked.set(candidateKey(model), Date.now() + (kind === "rate-limit" || kind === "quota" ? 600_000 : 60_000));
+  /** When the model becomes routable again, or undefined while not blocked. */
+  public blockedUntil(model: Model<any>): number | undefined {
+    const until = this.blocked.get(candidateKey(model));
+    return until !== undefined && until > Date.now() ? until : undefined;
+  }
+
+  private setBackoff(model: Model<any>, kind: ModelErrorKind, headers?: Record<string, string>): void {
+    const now = Date.now();
+    let until: number;
+    if (kind === "quota" || kind === "rate-limit") {
+      // A usage limit lifts when the quota window restarts: trust the
+      // provider's reported reset, otherwise assume a full window from now.
+      const reported = reportedResetMs(headers, now);
+      until = Math.max(reported ?? now + quotaWindowFor(model.provider), now + 1_000);
+    } else {
+      until = now + 60_000;
+    }
+    this.blocked.set(candidateKey(model), Math.min(until, now + MAX_BACKOFF_MS));
   }
 
   /**
