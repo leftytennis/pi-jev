@@ -21,6 +21,24 @@ test("classifies provider limit errors", () => {
   assert.equal(classifyModelError(new Error("quota exceeded")), "quota");
 });
 
+test("abstains in subagent child sessions to protect the launch model contract", async () => {
+  let selected = 0;
+  const fast = model("fast");
+  const reasoning = model("reasoning", { reasoning: true, contextWindow: 200000 });
+  const pi: any = { setModel: async () => { selected++; } };
+  const ctx: any = {
+    model: fast,
+    modelRegistry: { getAvailable: () => [fast, reasoning] },
+    getSystemPrompt: () => "",
+    sessionManager: { getSessionName: () => "subagent-delegate-4163dd64-1" },
+  };
+  const router = new AutoModelRouter(pi, true);
+  const result = await router.route("plan a safe migration", ctx);
+  assert.equal(result.skipped, "subagent-session");
+  assert.equal(result.changed, false);
+  assert.equal(selected, 0);
+});
+
 test("selects available model and skips unchanged selection", async () => {
   let selected = 0;
   const fast = model("fast");
