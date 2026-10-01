@@ -15,8 +15,46 @@ const model = (id: string, extra: Record<string, unknown> = {}) => ({
 test("classifies model needs by task signals", () => {
   assert.equal(classifyModelNeed("plan a security decision").profile, "reasoning");
   assert.equal(classifyModelNeed("inspect this screenshot", 0, true).profile, "vision");
+  assert.equal(classifyModelNeed("review this URL", 0, false, true).profile, "url");
   assert.equal(classifyModelNeed("review the entire codebase").profile, "long-context");
   assert.equal(classifyModelNeed("hi, list files").profile, "fast");
+});
+
+test("selects URL-capable model for URL input", async () => {
+  const textOnly = model("text-only");
+  const urlModel = model("opencode-zen", { input: ["text", "url"], contextWindow: 200000 });
+  const pi: any = { setModel: async () => {} };
+  const ctx: any = {
+    model: textOnly,
+    modelRegistry: { getAvailable: () => [textOnly, urlModel] },
+    getSystemPrompt: () => "",
+  };
+  const router = new AutoModelRouter(pi, true);
+  const result = await router.route("summarize this page", ctx, { hasUrls: true });
+  assert.equal(result.model?.id, "opencode-zen");
+});
+
+test("URL input is never routed to a model that cannot accept it, even when Jev scores", async () => {
+  const textOnly = model("text-only", { reasoning: true, contextWindow: 1000000 });
+  const urlModel = model("opencode-zen", { input: ["text", "url"] });
+  const scored: string[][] = [];
+  const jev: any = {
+    isConfigured: () => true,
+    evaluate: async (req: any) => {
+      if (req.questions.profile) {
+        assert.equal(req.state.task.has_urls, true);
+        return { answers: { profile: { type: "choice", value: "url", confidence: 0.9, distribution: { url: 0.9, balanced: 0.1 } } }, model: "jev-latest", elapsedMs: 1 };
+      }
+      scored.push(req.state.candidates.map((c: any) => c.model));
+      return { answers: Object.fromEntries(Object.keys(req.questions).map((q) => [q, { type: "score", value: 3, confidence: 0.9 }])), model: "jev-latest", elapsedMs: 1 };
+    },
+  };
+  const router = new AutoModelRouter({ setModel: async () => {} } as any, true, jev);
+  const result = await router.route("summarize https://example.com", ctxWith([textOnly, urlModel]), { hasUrls: true });
+  assert.equal(result.model?.id, "opencode-zen");
+  assert.deepEqual(scored, [["opencode-zen"]]);
+  const none = await router.route("summarize https://example.com", ctxWith([textOnly]), { hasUrls: true });
+  assert.equal(none.skipped, "no-model");
 });
 
 test("classifies provider limit errors", () => {
@@ -559,6 +597,7 @@ test("scores candidates with jev when configured", async () => {
     reasoning: "A request needing multi-step reasoning, careful analysis, planning, debugging, or trade-off evaluation.",
     "long-context": "A request needing many files or a large body of material held in context at once.",
     vision: "A request involving image input or understanding visual content.",
+    url: "A request involving a URL, link, or web page to read or act on.",
   });
   assert.equal(requests[1].state.task.classified_need.profile, "reasoning");
   assert.equal(requests[1].state.task.classified_need.secondary_profile, undefined, "a confident single profile is not combined");

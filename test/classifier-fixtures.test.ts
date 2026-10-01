@@ -7,6 +7,7 @@ interface Fixture {
   id: string;
   prompt: string;
   hasImages?: boolean;
+  hasUrls?: boolean;
   contextChars?: number;
   expectProfile: string;
 }
@@ -18,7 +19,7 @@ const fixtures: Fixture[] = JSON.parse(readFileSync(new URL("./fixtures/model-ro
 // precisely so regex repairs are never tuned to a single live sample.
 for (const f of fixtures) {
   test(`fixture: ${f.id}`, () => {
-    const need = classifyModelNeed(f.prompt, f.contextChars ?? 0, f.hasImages ?? false);
+    const need = classifyModelNeed(f.prompt, f.contextChars ?? 0, f.hasImages ?? false, f.hasUrls ?? false);
     assert.equal(need.profile, f.expectProfile);
   });
 }
