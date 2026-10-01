@@ -118,7 +118,7 @@ export default function (pi: ExtensionAPI) {
       // It is wired regardless so the router honors cancellation wherever a live
       // signal exists; preflight routing is otherwise bounded by the router's
       // internal timeout. True preflight cancellation needs host support.
-      const modelResult = await autoModel.route(event.prompt, ctx, { hasImages: Boolean(event.images?.length), signal: ctx.signal });
+      const modelResult = await autoModel.route(event.prompt, ctx, { hasImages: Boolean(event.images?.length), hasUrls: Boolean((event as any).urls?.length), signal: ctx.signal });
       // Always reflect the outcome: a skip or failed switch must be visible, not silent.
       modelStatus = describeRouteStatus(modelResult);
       ctx.ui.setStatus("jev", modelStatus);

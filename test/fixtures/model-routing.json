@@ -19,5 +19,8 @@
   { "id": "balanced-history", "prompt": "history of bicycles", "expectProfile": "balanced" },
   { "id": "balanced-context-switching", "prompt": "explain context switching", "expectProfile": "balanced" },
   { "id": "balanced-keep-context", "prompt": "keep the context in mind", "expectProfile": "balanced" },
-  { "id": "balanced-overview", "prompt": "Give me a considered overview of the history and cultural impact of the bicycle.", "expectProfile": "balanced" }
+  { "id": "balanced-overview", "prompt": "Give me a considered overview of the history and cultural impact of the bicycle.", "expectProfile": "balanced" },
+  { "id": "url-summarize-article", "prompt": "summarize this article for me", "expectProfile": "url" },
+  { "id": "url-input-signal", "prompt": "what does this say?", "hasUrls": true, "expectProfile": "url" },
+  { "id": "vision-beats-url", "prompt": "describe the screenshot on this page", "expectProfile": "vision" }
 ]
