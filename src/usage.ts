@@ -79,6 +79,9 @@ export interface UsageDeps {
 
 type Parsed = { windows: QuotaWindow[]; plan?: string; limitReached?: boolean };
 
+/** An error whose message this module wrote and is safe to show; never wraps external text. */
+class UsageError extends Error {}
+
 interface AdapterContext {
   registry: UsageRegistry;
   fetch: typeof fetch;
@@ -322,8 +325,13 @@ export async function readClaudeCodeCredential(): Promise<ClaudeCodeCredential |
 /** Fetch JSON; errors carry the HTTP status only, never headers or tokens. */
 async function getJson(ctx: AdapterContext, url: string, headers: Record<string, string>): Promise<any> {
   const response = await ctx.fetch(url, { headers: { Accept: "application/json", ...headers }, signal: ctx.signal });
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  return response.json();
+  if (!response.ok) throw new UsageError(`HTTP ${response.status}`);
+  try {
+    return await response.json();
+  } catch {
+    // Parser messages quote the body, which may echo credentials.
+    throw new UsageError("response was not valid JSON");
+  }
 }
 
 /** Pi resolves some OAuth providers (Kimi) into an Authorization header rather than apiKey. */
@@ -339,7 +347,7 @@ function bearerFromHeaders(headers: Record<string, string | null> | undefined): 
 async function bearerFor(ctx: AdapterContext, provider: string): Promise<string> {
   const resolved = (await ctx.registry.getProviderAuth(provider))?.auth;
   const token = resolved?.apiKey || bearerFromHeaders(resolved?.headers);
-  if (!token) throw new Error("no credential from Pi");
+  if (!token) throw new UsageError("no credential from Pi");
   return token;
 }
 
@@ -361,9 +369,9 @@ const ADAPTERS: Record<string, PlatformAdapter> = {
     platform: "Anthropic Claude",
     async read(ctx) {
       const credential = await ctx.readClaudeCodeCredential();
-      if (!credential) throw new Error("no Claude Code credential (keychain or ~/.claude/.credentials.json)");
+      if (!credential) throw new UsageError("no Claude Code credential (keychain or ~/.claude/.credentials.json)");
       if (credential.expiresAt !== undefined && credential.expiresAt <= ctx.now.getTime()) {
-        throw new Error("Claude Code token expired; run Claude Code once to refresh it");
+        throw new UsageError("Claude Code token expired; run Claude Code once to refresh it");
       }
       const body = await getJson(ctx, "https://api.anthropic.com/api/oauth/usage", {
         Authorization: `Bearer ${credential.accessToken}`,
@@ -377,7 +385,7 @@ const ADAPTERS: Record<string, PlatformAdapter> = {
     async read(ctx) {
       const token = await bearerFor(ctx, "openai-codex");
       const accountId = codexAccountId(token);
-      if (!accountId) throw new Error("no ChatGPT account id in the Codex token");
+      if (!accountId) throw new UsageError("no ChatGPT account id in the Codex token");
       const body = await getJson(ctx, "https://chatgpt.com/backend-api/wham/usage", {
         Authorization: `Bearer ${token}`,
         "ChatGPT-Account-Id": accountId,
@@ -410,8 +418,8 @@ export const SUPPORTED_PLATFORMS: readonly string[] = Object.keys(ADAPTERS);
 
 function withTimeout(signal: AbortSignal | undefined, timeoutMs: number): { signal: AbortSignal; clear(): void } {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(new Error(`timed out after ${timeoutMs}ms`)), timeoutMs);
-  const onAbort = () => controller.abort(signal?.reason);
+  const timer = setTimeout(() => controller.abort(new UsageError(`timed out after ${timeoutMs}ms`)), timeoutMs);
+  const onAbort = () => controller.abort(new UsageError("cancelled"));
   if (signal?.aborted) onAbort();
   else signal?.addEventListener("abort", onAbort, { once: true });
   return {
@@ -423,9 +431,36 @@ function withTimeout(signal: AbortSignal | undefined, timeoutMs: number): { sign
   };
 }
 
-function describeError(err: unknown): string {
-  if (err instanceof Error) return err.message || err.name;
-  return String(err);
+/**
+ * Rejects when the signal aborts, so a step that ignores the signal (Pi's
+ * getProviderAuth takes none) cannot outlive the per-platform budget.
+ */
+function abortable<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) {
+    // The abandoned work may still reject later; keep that from going unhandled.
+    work.catch(() => {});
+    return Promise.reject(signal.reason);
+  }
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(signal.reason);
+    signal.addEventListener("abort", onAbort, { once: true });
+    work.then(
+      (value) => { signal.removeEventListener("abort", onAbort); resolve(value); },
+      (err) => { signal.removeEventListener("abort", onAbort); reject(err); }
+    );
+  });
+}
+
+/**
+ * The reason shown for a failed platform. Only messages this module wrote are
+ * passed through; anything else (parser, network, or dependency errors) can
+ * quote response bodies or credentials, so it is reduced to a category.
+ */
+function safeReason(err: unknown, signal: AbortSignal): string {
+  if (signal.aborted && signal.reason instanceof UsageError) return signal.reason.message;
+  if (err instanceof UsageError) return err.message;
+  if (err instanceof TypeError) return "network error";
+  return "unexpected error";
 }
 
 /**
@@ -445,17 +480,16 @@ export async function collectPlatformUsage(deps: UsageDeps): Promise<UsageReport
       const adapter = ADAPTERS[provider];
       const guard = withTimeout(deps.signal, timeoutMs);
       try {
-        const parsed = await adapter.read({
+        const parsed = await abortable(adapter.read({
           registry: deps.registry,
           fetch: deps.fetch ?? fetch,
           readClaudeCodeCredential: deps.readClaudeCodeCredential ?? readClaudeCodeCredential,
           now,
           signal: guard.signal,
-        });
+        }), guard.signal);
         return { provider, platform: adapter.platform, ...parsed };
       } catch (err) {
-        const reason = guard.signal.aborted && guard.signal.reason instanceof Error ? guard.signal.reason.message : describeError(err);
-        return { provider, platform: adapter.platform, windows: [], error: reason };
+        return { provider, platform: adapter.platform, windows: [], error: safeReason(err, guard.signal) };
       } finally {
         guard.clear();
       }
