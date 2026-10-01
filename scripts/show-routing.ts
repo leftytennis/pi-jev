@@ -6,7 +6,7 @@
 // Tier-policy and quota exclusions are listed separately at the end.
 // Usage: node --import tsx scripts/show-routing.ts [--frontier]
 import { ModelRegistry, ModelRuntime } from "@earendil-works/pi-coding-agent";
-import { AutoModelRouter, applyModelTierPolicy, compareGeneration, heuristicScore, pressureForModel, pressureFromReport, QUOTA_DEMOTE_PERCENT, QUOTA_EXCLUDE_PERCENT } from "../src/model-router.js";
+import { attributeScopes, AutoModelRouter, applyModelTierPolicy, compareGeneration, heuristicScore, pressureForModel, pressureFromReport, QUOTA_DEMOTE_PERCENT, QUOTA_EXCLUDE_PERCENT } from "../src/model-router.js";
 import { collectPlatformUsage } from "../src/usage.js";
 import { tierKey, type QualityTier } from "../src/tiers.js";
 
@@ -33,7 +33,7 @@ const tierOf = (m: any): QualityTier => tiers.get(tierKey(m.provider, m.id))?.ti
 const basisOf = (m: any): string => tiers.get(tierKey(m.provider, m.id))?.basis ?? "default";
 
 const report = await collectPlatformUsage({ registry });
-const snapshot = pressureFromReport(report);
+const snapshot = attributeScopes(pressureFromReport(report), models);
 
 type Row = { model: any; quota: string; headroom: number; demoted: boolean };
 const rows: Row[] = models.map((model) => {

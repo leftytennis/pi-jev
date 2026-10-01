@@ -143,30 +143,53 @@ export type QuotaSnapshotSource = (ctx: ExtensionContext, signal?: AbortSignal) 
 /**
  * Shape a usage report into routing pressure. Provider-wide pressure comes from
  * the fullest unscoped window; model-scoped windows (Anthropic `weekly_scoped`)
- * become scoped entries that bind only their own models. A platform reporting
- * nothing but scoped windows cannot be attributed per model, so its fullest
- * window falls back to provider-wide pressure.
+ * always become scoped entries, even when they are the only windows reported.
+ * attributeScopes later decides, against the catalog, which scopes bind models
+ * and which must apply provider-wide.
  */
 export function pressureFromReport(report: UsageReport): QuotaSnapshot {
   const providers = new Map<string, QuotaPressure>();
   const scoped: ScopedQuotaPressure[] = [];
   for (const platform of report.platforms) {
-    const unscoped = platform.windows.filter((w) => !w.scopeModel);
-    const basis = unscoped.length > 0 ? unscoped : platform.windows;
-    const window = bindingWindow({ ...platform, windows: basis });
-    if (!window && !platform.limitReached) continue;
-    providers.set(platform.provider, {
-      usedPercent: window?.usedPercent ?? 100,
-      limitReached: Boolean(platform.limitReached),
-      windowLabel: window?.label,
-    });
-    // Scoped buckets ride alongside the provider-wide pressure; when they were
-    // the only windows reported they already fed the provider-wide entry above.
-    if (unscoped.length > 0) {
-      for (const w of platform.windows) {
-        if (w.scopeModel) scoped.push({ provider: platform.provider, scope: w.scopeModel, usedPercent: w.usedPercent, limitReached: false, windowLabel: w.label });
-      }
+    const window = bindingWindow({ ...platform, windows: platform.windows.filter((w) => !w.scopeModel) });
+    if (window || platform.limitReached) {
+      providers.set(platform.provider, {
+        usedPercent: window?.usedPercent ?? 100,
+        limitReached: Boolean(platform.limitReached),
+        windowLabel: window?.label,
+      });
     }
+    if (platform.error) continue;
+    for (const w of platform.windows) {
+      if (w.scopeModel) scoped.push({ provider: platform.provider, scope: w.scopeModel, usedPercent: w.usedPercent, limitReached: false, windowLabel: w.label });
+    }
+  }
+  return { providers, scoped };
+}
+
+/**
+ * Resolve scoped pressure against the provider catalog. A scope naming a
+ * catalog model stays scoped and binds only that model. A scope matching
+ * nothing cannot be attributed, so it joins the provider-wide pressure (the
+ * fuller window wins) and counts in every comparison: exclusion, demotion,
+ * and headroom. Pass the full registry, not a tier-filtered pool, or a scope
+ * whose models the tier policy removed would spread to the whole provider.
+ */
+export function attributeScopes(snapshot: QuotaSnapshot, catalog: readonly { provider: string; id: string }[]): QuotaSnapshot {
+  const providers = new Map(snapshot.providers);
+  const scoped: ScopedQuotaPressure[] = [];
+  for (const s of snapshot.scoped) {
+    if (catalog.some((m) => m.provider === s.provider && scopeMatchesModel(s.scope, m.id))) {
+      scoped.push(s);
+      continue;
+    }
+    const wide = providers.get(s.provider);
+    const fuller = !wide || s.usedPercent > wide.usedPercent ? s : wide;
+    providers.set(s.provider, {
+      usedPercent: fuller.usedPercent,
+      limitReached: Boolean(wide?.limitReached || s.limitReached),
+      windowLabel: fuller.windowLabel,
+    });
   }
   return { providers, scoped };
 }
@@ -777,7 +800,12 @@ export class AutoModelRouter {
       // hard requirement such as the vision gate: when no surviving candidate
       // satisfies it, the over-quota models stay eligible and the provider's
       // own rejection remains the safety net.
-      const quota = await quotaPromise;
+      // Attribution checks the whole registry, not the routed pool: the tier
+      // policy may already have removed the scoped models (Fable is tier 5,
+      // absent without a frontier request), and that must not turn their
+      // bucket into a provider-wide limit.
+      const reported = await quotaPromise;
+      const quota = reported && attributeScopes(reported, ctx.modelRegistry.getAvailable());
       const quotaNotes: string[] = [];
       const demotedProviders = new Map<string, QuotaPressure>();
       let routedPool = pool;
@@ -788,20 +816,8 @@ export class AutoModelRouter {
           if (pressure.limitReached || pressure.usedPercent >= QUOTA_EXCLUDE_PERCENT) excludedProviders.set(provider, pressure);
           else if (pressure.usedPercent >= QUOTA_DEMOTE_PERCENT) demotedProviders.set(provider, pressure);
         }
-        // Attribution checks the whole registry, not the routed pool: the tier
-        // policy may already have removed the scoped models (Fable is tier 5,
-        // absent without a frontier request), and that must not turn their
-        // bucket into a provider-wide limit.
-        const catalog = ctx.modelRegistry.getAvailable();
         for (const s of quota.scoped) {
           const scopeApplies = (m: Model<any>) => m.provider === s.provider && scopeMatchesModel(s.scope, m.id);
-          if (!catalog.some(scopeApplies)) {
-            // Unknown scope name: treat the bucket provider-wide, matching the
-            // pre-scoping behavior for platforms whose scopes we cannot parse.
-            if (s.limitReached || s.usedPercent >= QUOTA_EXCLUDE_PERCENT) excludedProviders.set(s.provider, s);
-            else if (s.usedPercent >= QUOTA_DEMOTE_PERCENT) demotedProviders.set(s.provider, s);
-            continue;
-          }
           if ((s.limitReached || s.usedPercent >= QUOTA_EXCLUDE_PERCENT) && pool.some(scopeApplies)) excludedScopes.push(s);
         }
         const isExcluded = (m: Model<any>): boolean =>
