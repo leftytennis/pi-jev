@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { classifyModelError, classifyModelNeed, AutoModelRouter, describeRouteStatus, parseDurationMs, parseResetHeader, quotaWindowFor, DEFAULT_QUOTA_WINDOW_MS, generationOf, compareGeneration, familyOf, attributeScopes, pressureFromReport, requestsFrontierModel, scopeMatchesModel, applyModelTierPolicy } from "../src/model-router.js";
 import { JevClient } from "../src/jev.js";
-import { parseTierOverlay, type TierTable } from "../src/tiers.js";
+import type { TierTable } from "../src/tiers.js";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -528,10 +528,21 @@ test("a missing overlay file is silent and yields price-inferred tiers", async (
   assert.equal(table.get("test/b")?.basis, "price-inferred");
 });
 
-test("overlay file path comes from PI_JEV_MODEL_TIERS when set", () => {
-  const parsed = parseTierOverlay(JSON.stringify({ tiers: { "openai-codex/gpt-6-astra": "flagship" } }));
-  assert.ok("tiers" in parsed);
-  assert.deepEqual(parsed.tiers.get("openai-codex/gpt-6-astra"), { tier: 5, basis: "configured" });
+test("overlay file path comes from PI_JEV_MODEL_TIERS when set", (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "jev-tiers-env-"));
+  const file = path.join(dir, "tiers.json");
+  fs.writeFileSync(file, JSON.stringify({ tiers: { "test/a": "flagship" } }));
+  const previous = process.env.PI_JEV_MODEL_TIERS;
+  t.after(() => {
+    if (previous === undefined) delete process.env.PI_JEV_MODEL_TIERS;
+    else process.env.PI_JEV_MODEL_TIERS = previous;
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  process.env.PI_JEV_MODEL_TIERS = file;
+  const router = new AutoModelRouter({ setModel: async () => {} } as any, true);
+  const table = router.tiersFor(ctxWith([model("a", { cost: { input: 1, output: 1 } }), model("b", { cost: { input: 9, output: 9 } })]));
+  assert.deepEqual(table.get("test/a"), { tier: 5, basis: "configured" });
+  assert.equal(table.get("test/b")?.basis, "price-inferred");
 });
 
 test("blocks quota model for future fallback", () => {
