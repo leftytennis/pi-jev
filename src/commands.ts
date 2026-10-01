@@ -8,6 +8,8 @@ import type { JevCompactor } from "./compact.js";
 import type { AgentOrchestrator } from "./orchestrator.js";
 import type { ToolGuard } from "./tool-guard.js";
 import { designEvaluation } from "./designer.js";
+import { renderCatalog } from "./catalog.js";
+import { collectPlatformUsage, renderUsage, hottestPercent, HOT_PERCENT } from "./usage.js";
 import type { JevEvaluationRequest } from "./types.js";
 import { JEV_TOOL_NAMES, isJevTool } from "./types.js";
 import { JEV_THRESHOLD } from "./skills.js";
@@ -28,13 +30,20 @@ export function registerJevCommands(
   const modelMode = autoModel ?? { enabled: false, setEnabled: () => {} };
   const guardMode = toolGuard ?? { enabled: false, setEnabled: () => {} };
   pi.registerCommand("jev", {
-    description: "Manage TypeSafe Jev integration (status, enable, disable, auto, test, skills)",
+    description: "Manage TypeSafe Jev integration (status, usage, catalog, enable, disable, auto, test, skills)",
     handler: async (args: string, ctx: ExtensionCommandContext) => {
       const tokens = args.trim().split(/\s+/).filter(Boolean);
       const sub = (tokens[0] ?? "").toLowerCase();
       const rest = tokens.slice(1).join(" ");
       const usage =
-        "Available options: /jev status, /jev skills [query], /jev test [prompt], /jev enable, /jev disable, /jev auto [on|off], /jev auto-model [on|off], /jev compact [on|off], /jev auto-agents [on|off], /jev tool-guard [on|off], /jev agents [task]";
+        "Available options: /jev status, /jev usage, /jev catalog, /jev skills [query], /jev test [prompt], /jev enable, /jev disable, /jev auto [on|off], /jev auto-model [on|off], /jev compact [on|off], /jev auto-agents [on|off], /jev tool-guard [on|off], /jev agents [task]";
+
+      if (sub === "usage" || sub === "quota") {
+        ctx.ui.notify("Reading quota usage from each authenticated platform...", "info");
+        const report = await collectPlatformUsage({ registry: ctx.modelRegistry, signal: ctx.signal });
+        ctx.ui.notify(renderUsage(report), hottestPercent(report) >= HOT_PERCENT ? "warning" : "info");
+        return;
+      }
 
       if (sub === "status" || sub === "") {
         const origin = jevClient.getKeyOrigin();
@@ -61,6 +70,15 @@ export function registerJevCommands(
             (jevClient.stats.lastError ? `• Last error: ${jevClient.stats.lastError}` : ""),
           "info"
         );
+        return;
+      }
+
+      if (sub === "catalog" || sub === "models") {
+        try {
+          ctx.ui.notify(renderCatalog(ctx, autoModel?.tiersFor(ctx)), "info");
+        } catch (err: any) {
+          ctx.ui.notify(`Could not build model catalog: ${err?.message || err}`, "error");
+        }
         return;
       }
 
