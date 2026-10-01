@@ -329,3 +329,40 @@ test("/jev usage command renders the per-platform report", async () => {
 test("SUPPORTED_PLATFORMS names the four adapters", () => {
   assert.deepEqual([...SUPPORTED_PLATFORMS].sort(), ["claude-bridge", "kimi-coding", "openai-codex", "zai"]);
 });
+
+test("platform errors never echo response bodies or dependency messages that may carry credentials", async () => {
+  const SENTINEL = "FAKE_SENTINEL_TOKEN";
+  const cases: Array<[string, typeof fetch, string]> = [
+    ["non-JSON body", (async () => new Response(SENTINEL, { status: 200 })) as unknown as typeof fetch, "response was not valid JSON"],
+    ["network failure", (async () => { throw new TypeError(`fetch failed for ${SENTINEL}`); }) as unknown as typeof fetch, "network error"],
+    ["dependency error", (async () => { throw new Error(`upstream said ${SENTINEL}`); }) as unknown as typeof fetch, "unexpected error"],
+  ];
+  for (const [name, fetchImpl, expected] of cases) {
+    const report = await collectPlatformUsage({ registry: fakeRegistry(["zai"], { zai: SENTINEL }), fetch: fetchImpl, now: () => NOW });
+    assert.equal(report.platforms[0].error, expected, name);
+    assert.ok(!renderUsage(report, NOW).includes(SENTINEL), `${name}: rendered usage leaks the credential`);
+  }
+});
+
+test("collectPlatformUsage bounds credential lookup, not just the request", async () => {
+  const registry: UsageRegistry = {
+    ...fakeRegistry(["zai"], {}),
+    getProviderAuth: () => new Promise(() => {}),
+  };
+  const started = Date.now();
+  const report = await collectPlatformUsage({
+    registry,
+    fetch: (async () => { throw new Error("must not be called"); }) as unknown as typeof fetch,
+    timeoutMs: 20,
+    now: () => NOW,
+  });
+  assert.ok(Date.now() - started < 1_000, "a never-settling getProviderAuth must not outlive the timeout");
+  assert.deepEqual(report.platforms.map((p) => [p.provider, p.error]), [["zai", "timed out after 20ms"]]);
+});
+
+test("a caller's cancellation reason is never shown as the platform error", async () => {
+  const controller = new AbortController();
+  controller.abort(new Error("internal detail FAKE_SENTINEL_TOKEN"));
+  const report = await collectPlatformUsage({ registry: fakeRegistry(["zai"], { zai: "zk" }), signal: controller.signal, now: () => NOW });
+  assert.equal(report.platforms[0].error, "cancelled");
+});
