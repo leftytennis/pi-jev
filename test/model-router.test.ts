@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { classifyModelError, classifyModelNeed, AutoModelRouter, describeRouteStatus, parseDurationMs, parseResetHeader, quotaWindowFor, DEFAULT_QUOTA_WINDOW_MS, generationOf, compareGeneration, familyOf, requestsFrontierModel, scopeMatchesModel, applyModelTierPolicy } from "../src/model-router.js";
+import { classifyModelError, classifyModelNeed, AutoModelRouter, describeRouteStatus, parseDurationMs, parseResetHeader, quotaWindowFor, DEFAULT_QUOTA_WINDOW_MS, generationOf, compareGeneration, familyOf, attributeScopes, pressureFromReport, requestsFrontierModel, scopeMatchesModel, applyModelTierPolicy } from "../src/model-router.js";
 import { JevClient } from "../src/jev.js";
 import { parseTierOverlay, type TierTable } from "../src/tiers.js";
 import * as fs from "node:fs";
@@ -241,6 +241,52 @@ test("a hit Fable limit leaves other Claude models routable when tier policy alr
   assert.equal(result.model?.id, "claude-opus-5-5");
   assert.doesNotMatch(result.reason, /claude-bridge over quota/);
   assert.doesNotMatch(result.reason, /Fable-scoped models excluded/, "nothing to exclude: Fable was never in the pool");
+});
+
+test("scoped windows stay scoped even when a platform reports nothing else", async () => {
+  const fable = model("claude-fable-5-1", { provider: "claude-bridge", reasoning: true, contextWindow: 1000000 });
+  const opus = model("claude-opus-5-5", { provider: "claude-bridge", reasoning: true, contextWindow: 1000000 });
+  const glm = model("glm-5.3", { provider: "zai", reasoning: true, contextWindow: 200000 });
+  const fableOnly = usageReport([["claude-bridge", 0, { windows: [{ label: "weekly (Fable)", usedPercent: 100, scopeModel: "Fable" }] }]]);
+  const snapshot = pressureFromReport(fableOnly as any);
+  assert.equal(snapshot.providers.has("claude-bridge"), false);
+  assert.deepEqual(snapshot.scoped.map((s) => [s.scope, s.usedPercent]), [["Fable", 100]]);
+  const router = new AutoModelRouter({ setModel: async () => {} } as any, true, undefined, {
+    tierTable: tiers({ "claude-bridge/claude-fable-5-1": 5, "claude-bridge/claude-opus-5-5": 4, "zai/glm-5.3": 4 }),
+    quotaSource: async () => fableOnly as any,
+  });
+  const result = await router.route("plan a safe migration", ctxWith([fable, opus, glm]));
+  assert.equal(result.model?.id, "claude-opus-5-5", "a Fable-only report must not exclude Opus");
+  assert.doesNotMatch(result.reason, /claude-bridge over quota/);
+});
+
+test("attributeScopes keeps catalog-matched scopes and folds unmatched ones into provider pressure", () => {
+  const snapshot = {
+    providers: new Map([["claude-bridge", { usedPercent: 5, limitReached: false, windowLabel: "5-hour" }]]),
+    scoped: [
+      { provider: "claude-bridge", scope: "Fable", usedPercent: 95, limitReached: false, windowLabel: "weekly (Fable)" },
+      { provider: "claude-bridge", scope: "Zorblax", usedPercent: 60, limitReached: false, windowLabel: "weekly (Zorblax)" },
+    ],
+  };
+  const attributed = attributeScopes(snapshot, [{ provider: "claude-bridge", id: "claude-fable-5-1" }, { provider: "claude-bridge", id: "claude-opus-5-5" }]);
+  assert.deepEqual(attributed.scoped.map((s) => s.scope), ["Fable"]);
+  assert.deepEqual(attributed.providers.get("claude-bridge"), { usedPercent: 60, limitReached: false, windowLabel: "weekly (Zorblax)" });
+  assert.equal(snapshot.providers.get("claude-bridge")?.usedPercent, 5, "input snapshot is not mutated");
+});
+
+test("an unmatched scope below the demote threshold still counts toward quota headroom", async () => {
+  const opus = model("claude-opus-5-5", { provider: "claude-bridge", reasoning: true, contextWindow: 200000 });
+  const glm = model("glm-5.3", { provider: "zai", reasoning: true, contextWindow: 200000 });
+  const router = new AutoModelRouter({ setModel: async () => {} } as any, true, undefined, {
+    tierTable: tiers({ "claude-bridge/claude-opus-5-5": 4, "zai/glm-5.3": 4 }),
+    quotaSource: async () => usageReport([
+      ["claude-bridge", 5, { windows: [{ label: "5-hour", usedPercent: 5 }, { label: "weekly (Zorblax)", usedPercent: 60, scopeModel: "Zorblax" }] }],
+      ["zai", 20],
+    ]) as any,
+  });
+  const result = await router.route("plan a safe migration", ctxWith([opus, glm]));
+  assert.equal(result.model?.provider, "zai");
+  assert.match(result.reason, /headroom tiebreak: zai at 20% over claude-bridge at 60%/);
 });
 
 test("a scoped limit whose name matches no catalog model falls back to provider-wide", async () => {
