@@ -43,13 +43,18 @@ export function defaultTierOverlayPath(): string {
   return path.join(os.homedir(), ".pi", "agent", "jev-model-tiers.json");
 }
 
+export interface TierOverlay {
+  tiers: TierTable;
+  exclude: Set<string>;
+}
+
 /**
  * Parse overlay JSON. Strict by design: any malformed entry rejects the whole
  * file, because a half-parsed overlay would silently mix configured and
  * inferred bases. Unknown model keys are tolerated and inert — renamed or
  * removed models must not break the file. Pure; the caller surfaces errors.
  */
-export function parseTierOverlay(raw: string): { tiers: TierTable } | { error: string } {
+export function parseTierOverlay(raw: string): TierOverlay | { error: string } {
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
@@ -60,9 +65,9 @@ export function parseTierOverlay(raw: string): { tiers: TierTable } | { error: s
     return { error: "top level must be an object" };
   }
   for (const key of Object.keys(parsed)) {
-    if (key !== "comment" && key !== "tiers") return { error: `unknown top-level key "${key}"` };
+    if (key !== "comment" && key !== "tiers" && key !== "exclude") return { error: `unknown top-level key "${key}"` };
   }
-  const obj = parsed as { comment?: unknown; tiers?: unknown };
+  const obj = parsed as { comment?: unknown; tiers?: unknown; exclude?: unknown };
   if (obj.comment !== undefined && typeof obj.comment !== "string") {
     return { error: `"comment" must be a string` };
   }
@@ -82,10 +87,22 @@ export function parseTierOverlay(raw: string): { tiers: TierTable } | { error: s
     }
     tiers.set(key, { tier, basis: "configured" });
   }
-  return { tiers };
+  const exclude = new Set<string>();
+  if (obj.exclude !== undefined) {
+    if (!Array.isArray(obj.exclude)) {
+      return { error: `"exclude" must be an array of strings` };
+    }
+    for (const item of obj.exclude) {
+      if (typeof item !== "string") {
+        return { error: `"exclude" entries must be strings in the form "provider/model-id"` };
+      }
+      exclude.add(item);
+    }
+  }
+  return { tiers, exclude };
 }
 
-export type TierOverlayRead = { tiers: TierTable } | { error: string } | { missing: true };
+export type TierOverlayRead = TierOverlay | { error: string } | { missing: true };
 
 /** Read the overlay file. A missing file is not an error. */
 export function readTierOverlay(filePath: string): TierOverlayRead {

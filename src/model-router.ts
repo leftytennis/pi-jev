@@ -2,7 +2,7 @@ import type { ExtensionContext, ExtensionAPI } from "@earendil-works/pi-coding-a
 import type { Model } from "@earendil-works/pi-ai";
 import type { JevClient } from "./jev.js";
 import { bindingWindow, collectPlatformUsage, type UsageReport } from "./usage.js";
-import { DEFAULT_TIER, defaultTierOverlayPath, inferTiers, readTierOverlay, type QualityTier, type TierTable } from "./tiers.js";
+import { DEFAULT_TIER, defaultTierOverlayPath, inferTiers, readTierOverlay, type QualityTier, type TierOverlay, type TierTable } from "./tiers.js";
 import type { QuestionConfig } from "./types.js";
 
 export type ModelProfile = "fast" | "balanced" | "reasoning" | "long-context" | "vision" | "url";
@@ -421,27 +421,24 @@ export function requestsFrontierModel(prompt: string): boolean {
  * Apply policy before scoring, not in a pairwise comparator: mixing within-
  * provider version priority with cross-provider scores would be non-transitive.
  * The caller supplies scoped, available, non-backed-off, image-compatible models.
- * Within each tier, only the newest numeric version of each provider's model
- * family survives; versions are never compared across tiers, providers, or
- * families. Unknown versions and equal-version variants stay eligible for fit
- * scoring.
+ * Excluded models go first, then the frontier gate, so suppression picks the
+ * newest version the prompt may use. Only the newest numeric version of each
+ * provider's model family survives, whatever its tier; versions are never
+ * compared across providers or families. Unknown versions and equal-version
+ * variants stay eligible for fit scoring.
  */
 export function applyModelTierPolicy<M extends { provider: string; id: string }>(
-  models: readonly M[], tiers: TierTable, allowFrontier: boolean
+  models: readonly M[], tiers: TierTable, allowFrontier: boolean, exclude?: Set<string>
 ): M[] {
   const tierOf = (m: M) => tiers.get(`${m.provider}/${m.id}`)?.tier ?? DEFAULT_TIER;
-  const lineup = (m: M) => `${tierOf(m)}:${m.provider}:${familyOf(m.id)}`;
-  const allowed = models.filter((m) => allowFrontier || tierOf(m) !== 5);
-  const newest = new Map<string, M>();
-  for (const m of allowed) {
-    if (!generationOf(m.id).length) continue;
-    const previous = newest.get(lineup(m));
-    if (!previous || compareGeneration(m.id, previous.id) < 0) newest.set(lineup(m), m);
-  }
-  return allowed.filter((m) => {
-    const latest = newest.get(lineup(m));
-    return !latest || !generationOf(m.id).length || compareGeneration(m.id, latest.id) === 0;
-  });
+  const allowed = models.filter((m) => !exclude?.has(`${m.provider}/${m.id}`) && (allowFrontier || tierOf(m) !== 5));
+  return allowed.filter((m) => !allowed.some((other) => supersedes(other, m)));
+}
+
+/** True when `newer` is a later numeric version of `older` in the same provider family. */
+export function supersedes(newer: { provider: string; id: string }, older: { provider: string; id: string }): boolean {
+  return newer.provider === older.provider && familyOf(newer.id) === familyOf(older.id) &&
+    generationOf(newer.id).length > 0 && generationOf(older.id).length > 0 && compareGeneration(newer.id, older.id) < 0;
 }
 
 /** Descending by generation tuple; missing positions rank lowest. */
@@ -456,6 +453,9 @@ export function compareGeneration(a: string, b: string): number {
   return 0;
 }
 
+/** The slice of ExtensionContext that tier lookup needs; tooling passes a stub. */
+type TierContext = { modelRegistry: { getAvailable(): Model<any>[] }; ui?: { setStatus?(key: string, text: string): void } };
+
 export class AutoModelRouter {
   public enabled: boolean;
   private running = false;
@@ -467,6 +467,7 @@ export class AutoModelRouter {
   private readonly tierOverlay?: TierTable;
   private readonly tierOverlayPath?: string;
   private tierTableCache?: TierTable;
+  private overlayCache?: TierOverlay;
   private tierWarningShown = false;
   public last?: ModelRouteResult;
 
@@ -529,25 +530,35 @@ export class AutoModelRouter {
   }
 
   /**
-   * Quality tiers for the current registry lineup, computed once per session:
-   * an explicit overlay (injected, or read from PI_JEV_MODEL_TIERS /
-   * ~/.pi/agent/jev-model-tiers.json) wins per model and the provider price
-   * ladder fills the rest. The ladder is always computed from full registry
-   * availability, never a scoped pool, so scoping cannot re-rank tiers. A
-   * malformed overlay warns once and routing falls back to price inference.
+   * The explicit overlay, read once per session: injected tiers, or the file
+   * at PI_JEV_MODEL_TIERS / ~/.pi/agent/jev-model-tiers.json. A malformed
+   * file warns once and counts as absent, so routing falls back to price
+   * inference with nothing excluded.
    */
-  public tiersFor(ctx: { modelRegistry: { getAvailable(): Model<any>[] }; ui?: { setStatus?(key: string, text: string): void } }): TierTable {
-    if (this.tierTableCache) return this.tierTableCache;
-    let overlay = this.tierOverlay;
-    if (!overlay) {
+  private overlayFor(ctx: TierContext): TierOverlay {
+    if (this.overlayCache) return this.overlayCache;
+    let overlay: TierOverlay = { tiers: this.tierOverlay ?? new Map(), exclude: new Set() };
+    if (!this.tierOverlay) {
       const read = readTierOverlay(this.tierOverlayPath ?? process.env.PI_JEV_MODEL_TIERS ?? defaultTierOverlayPath());
       if ("error" in read && !this.tierWarningShown) {
         this.tierWarningShown = true;
         ctx.ui?.setStatus?.("jev", "jev: tier overlay invalid — using price inference");
       }
-      overlay = "tiers" in read ? read.tiers : new Map();
+      if ("tiers" in read) overlay = read;
     }
-    this.tierTableCache = inferTiers(ctx.modelRegistry.getAvailable(), overlay);
+    this.overlayCache = overlay;
+    return overlay;
+  }
+
+  /**
+   * Quality tiers for the current registry lineup, computed once per session:
+   * the overlay wins per model and the provider price ladder fills the rest.
+   * The ladder is always computed from full registry availability, never a
+   * scoped pool, so scoping cannot re-rank tiers.
+   */
+  public tiersFor(ctx: TierContext): TierTable {
+    if (this.tierTableCache) return this.tierTableCache;
+    this.tierTableCache = inferTiers(ctx.modelRegistry.getAvailable(), this.overlayFor(ctx).tiers);
     return this.tierTableCache;
   }
 
@@ -805,6 +816,7 @@ export class AutoModelRouter {
         need = classifyModelNeed(prompt, contextChars, hasImages, hasUrls);
       }
       const tierTable = this.tiersFor(ctx);
+      const excluded = this.overlayFor(ctx).exclude;
       const tierOf = (m: Model<any>): QualityTier => tierTable.get(candidateKey(m))?.tier ?? DEFAULT_TIER;
       const allowFrontier = requestsFrontierModel(prompt);
       const mustLeaveFrontier = current !== undefined && tierOf(current) === 5 && !allowFrontier;
@@ -815,21 +827,21 @@ export class AutoModelRouter {
       for (const [key, until] of this.blocked) {
         if (until <= now) this.blocked.delete(key);
       }
-      const currentBlocked = current !== undefined && this.blocked.has(candidateKey(current));
+      // A backed-off or excluded current model must be left even when the
+      // prompt gives no reason to switch.
+      const currentIneligible = current !== undefined && (this.blocked.has(candidateKey(current)) || excluded.has(candidateKey(current)));
       const availablePool = (ctx.scopedModels?.length ? ctx.scopedModels.map((x) => x.model) : ctx.modelRegistry.getAvailable())
         .filter((model) => {
           const until = this.blocked.get(candidateKey(model));
           return until === undefined || until < now;
         });
       const compatible = availablePool.filter((m) => meetsInputRequirements(m, hasImages, hasUrls));
-      const pool = applyModelTierPolicy(compatible, tierTable, allowFrontier);
-      const mustUpgradeSuperseded = current !== undefined && generationOf(current.id).length > 0 && pool.some((m) =>
-        m.provider === current.provider && tierOf(m) === tierOf(current) && familyOf(m.id) === familyOf(current.id) &&
-        compareGeneration(m.id, current.id) < 0);
-      if (need.confidence < ROUTING_CONFIDENCE_THRESHOLD && !allowFrontier && !mustLeaveFrontier && !mustUpgradeSuperseded && !currentBlocked) {
+      const pool = applyModelTierPolicy(compatible, tierTable, allowFrontier, excluded);
+      const mustUpgradeSuperseded = current !== undefined && pool.some((m) => supersedes(m, current));
+      if (need.confidence < ROUTING_CONFIDENCE_THRESHOLD && !allowFrontier && !mustLeaveFrontier && !mustUpgradeSuperseded && !currentIneligible) {
         return { ...fallback, profile: need.profile, reason: need.reason, skipped: "low-confidence" };
       }
-      const policyNote = `tier policy: ${allowFrontier ? "frontier explicitly requested" : "tier 5 reserved for explicit frontier requests"}; newest eligible version per provider family in each tier`;
+      const policyNote = `tier policy: ${allowFrontier ? "frontier explicitly requested" : "tier 5 reserved for explicit frontier requests"}; newest eligible version per provider family`;
       if (!pool.length) return { ...fallback, ...classified, reason: `no compatible model; ${policyNote}`, skipped: "no-model" };
       // Proactive quota pressure from the platforms' own usage endpoints.
       // Provider-wide pressure excludes or demotes every model on the
