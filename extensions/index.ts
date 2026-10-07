@@ -1,4 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { Model } from "@earendil-works/pi-ai";
 import { JevClient } from "../src/jev.js";
 import { ToolRouter } from "../src/router.js";
 import { SkillRouter } from "../src/skills.js";
@@ -100,14 +101,36 @@ export default function (pi: ExtensionAPI) {
     };
   });
 
+  const backoffDetail = (model: Model<any> | undefined): string => {
+    const until = model ? autoModel.blockedUntil(model) : undefined;
+    if (!until) return "fallback next prompt";
+    // A plan exclusion is backed off for days; a bare clock time would read as today.
+    const reset = new Date(until);
+    const longBackoff = until - Date.now() > 24 * 60 * 60 * 1000;
+    return `fallback until ${longBackoff ? reset.toLocaleString() : reset.toLocaleTimeString()}`;
+  };
+
   pi.on("after_provider_response", (event, ctx) => {
     const kind = autoModel.recordProviderResponse(event.status, ctx.model, event.headers);
     if (!kind) return;
-    const until = ctx.model ? autoModel.blockedUntil(ctx.model) : undefined;
-    const detail = until
-      ? `fallback until ${new Date(until).toLocaleTimeString()}`
-      : "fallback next prompt";
-    ctx.ui.setStatus("jev", `jev: ${kind} → ${detail}`);
+    ctx.ui.setStatus("jev", `jev: ${kind} → ${backoffDetail(ctx.model)}`);
+  });
+
+  // SDK-backed providers throw on error statuses before after_provider_response
+  // fires, so a failed run is recognized here from its final assistant message.
+  // Pi auto-retries after agent_end on whichever model is current, so a
+  // failover here moves the retries off the failing model.
+  pi.on("agent_end", async (event, ctx) => {
+    const last = [...event.messages].reverse().find((m) => m.role === "assistant");
+    if (last?.role !== "assistant" || last.stopReason !== "error" || !last.errorMessage) return;
+    // Blame the model named on the message: Pi's retries may already have
+    // moved the session to another model by the time this fires.
+    const failed = ctx.modelRegistry.getAvailable().find((m) => m.provider === last.provider && m.id === last.model)
+      ?? (ctx.model?.provider === last.provider && ctx.model.id === last.model ? ctx.model : undefined);
+    const kind = autoModel.recordProviderError(last.errorMessage, failed);
+    if (!kind) return;
+    const routed = await autoModel.failover(ctx);
+    ctx.ui.setStatus("jev", `jev: ${kind} → ${routed?.changed ? routed.model?.id : backoffDetail(failed)}`);
   });
 
   pi.on("before_agent_start", async (event, ctx) => {
