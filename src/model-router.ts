@@ -60,7 +60,9 @@ export function classifyModelNeed(prompt: string, contextChars = 0, hasImages = 
 export function classifyModelError(error: unknown): ModelErrorKind {
   const text = String((error as any)?.message ?? error).toLowerCase();
   // Plan entitlement first: Z.ai sends "plan does not yet include access" as a 429.
-  if (/(?:does not|doesn't)(?: yet)? include access|(?:do|does) not have access to|no access to (?:this |the )?model/.test(text)) return "access";
+  // Only access to the model itself counts; missing access to an organization
+  // or API is not a reason to bench the model for days.
+  if (/(?:does not|doesn't)(?: yet)? include access|(?:do|does) not have access to (?:it\b|(?:this |the )?model)|no access to (?:this |the )?model/.test(text)) return "access";
   if (/context|too many tokens|token limit|maximum.*token|prompt too long/.test(text)) return "context-limit";
   if (/quota|credit|billing|insufficient.*fund|resource_exhausted/.test(text)) return "quota";
   if (/rate.?limit|too many requests|429/.test(text)) return "rate-limit";

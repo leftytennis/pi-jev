@@ -63,6 +63,12 @@ test("classifies provider limit errors", () => {
   assert.equal(classifyModelError(new Error("quota exceeded")), "quota");
   // Z.ai reports a model outside the subscription plan as a 429.
   assert.equal(classifyModelError('429: {"code":"1311","message":"Your current subscription plan does not yet include access to GLM-5.3-Highspeed"}'), "access");
+  // OpenAI-style model entitlement wording.
+  assert.equal(classifyModelError("The model `gpt-9` does not exist or you do not have access to it."), "access");
+  assert.equal(classifyModelError("You do not have access to this model"), "access");
+  // Access to something other than a model is not a reason to bench that model for days.
+  assert.notEqual(classifyModelError("You do not have access to the organization org-123"), "access");
+  assert.notEqual(classifyModelError("Project does not have access to the Files API"), "access");
 });
 
 test("failed assistant turns back off the model by error kind", () => {
