@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tier overlay file (`~/.pi/agent/jev-model-tiers.json`) now supports an `exclude` array to permanently disable models, separate from tiering. Useful for models the user cannot access.
 
 ### Changed
+- Development dependencies on `@earendil-works/pi-ai`, `pi-coding-agent`, and `pi-tui` now track `^1.0.0`, so the repo's catalog scripts see the same models as an installed Pi 1.0.0. Peer dependencies are unchanged.
 - **Cross-tier version suppression.** Model suppression now compares versions across all tiers, not just within each tier. Within a provider and family, only the newest version survives routing, whatever its tier. Tier 5 (frontier) models are still gated to explicit frontier requests.
 
 ### Fixed
