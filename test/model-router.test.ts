@@ -61,6 +61,34 @@ test("classifies provider limit errors", () => {
   assert.equal(classifyModelError(new Error("429 rate limit")), "rate-limit");
   assert.equal(classifyModelError(new Error("context window exceeded")), "context-limit");
   assert.equal(classifyModelError(new Error("quota exceeded")), "quota");
+  // Z.ai reports a model outside the subscription plan as a 429.
+  assert.equal(classifyModelError('429: {"code":"1311","message":"Your current subscription plan does not yet include access to GLM-5.3-Highspeed"}'), "access");
+});
+
+test("failed assistant turns back off the model by error kind", () => {
+  const router = new AutoModelRouter({ setModel: async () => {} } as any, true);
+  const before = Date.now();
+  const excluded = model("glm-5.3-highspeed", { provider: "zai" });
+  assert.equal(router.recordProviderError('429: {"code":"1311","message":"Your current subscription plan does not yet include access to GLM-5.3-Highspeed"}', excluded), "access");
+  assert.ok(router.blockedUntil(excluded)! >= before + 24 * 3_600_000, "a plan exclusion does not lift with the quota window");
+
+  const limited = model("glm-5.3", { provider: "zai" });
+  assert.equal(router.recordProviderError("429 Too Many Requests", limited), "rate-limit");
+  const limitedUntil = router.blockedUntil(limited)!;
+  assert.ok(limitedUntil >= before + DEFAULT_QUOTA_WINDOW_MS - 1_000 && limitedUntil < before + 24 * 3_600_000);
+
+  // A header-informed reset recorded by after_provider_response is kept.
+  const codex = model("codex", { provider: "openai-codex" });
+  router.recordProviderResponse(429, codex, { "Retry-After": "30" });
+  router.recordProviderError("429 rate limit", codex);
+  assert.ok(router.blockedUntil(codex)! <= before + 31_500);
+
+  // Context overflow belongs to Pi's compaction; unknown errors are not the model's fault.
+  for (const message of ["prompt too long: context window exceeded", "tool schema invalid"]) {
+    const m = model(message);
+    assert.equal(router.recordProviderError(message, m), undefined);
+    assert.equal(router.blockedUntil(m), undefined);
+  }
 });
 
 test("abstains in subagent child sessions to protect the launch model contract", async () => {
@@ -549,6 +577,24 @@ test("blocks quota model for future fallback", () => {
   const current = model("quota-model");
   const router = new AutoModelRouter({ setModel: async () => {} } as any, true);
   assert.equal(router.recordProviderResponse(429, current), "rate-limit");
+});
+
+test("routes away from a blocked current model even on low-confidence prompts", async () => {
+  const blocked = model("glm-5.3-highspeed", { provider: "zai", reasoning: true, contextWindow: 1000000 });
+  const fallbackModel = model("glm-5.3-flash", { provider: "zai", reasoning: true, input: ["text", "image"], contextWindow: 1000000 });
+  let selected: string | undefined;
+  const router = new AutoModelRouter({ setModel: async (m: any) => { selected = m.id; } } as any, true);
+  router.recordProviderResponse(429, blocked);
+
+  const result = await router.route("show me the model tier catalog", {
+    model: blocked,
+    modelRegistry: { getAvailable: () => [blocked, fallbackModel] },
+    getSystemPrompt: () => "",
+  } as any);
+
+  assert.equal(result.model?.id, "glm-5.3-flash");
+  assert.equal(selected, "glm-5.3-flash");
+  assert.notEqual(result.skipped, "low-confidence");
 });
 
 test("parses duration strings for quota windows", () => {

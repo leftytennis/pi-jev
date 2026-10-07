@@ -6,7 +6,7 @@ import { DEFAULT_TIER, defaultTierOverlayPath, inferTiers, readTierOverlay, type
 import type { QuestionConfig } from "./types.js";
 
 export type ModelProfile = "fast" | "balanced" | "reasoning" | "long-context" | "vision" | "url";
-export type ModelErrorKind = "quota" | "rate-limit" | "context-limit" | "unavailable" | "timeout" | "auth" | "unknown";
+export type ModelErrorKind = "access" | "quota" | "rate-limit" | "context-limit" | "unavailable" | "timeout" | "auth" | "unknown";
 
 export interface ModelRouteResult {
   changed: boolean;
@@ -59,6 +59,8 @@ export function classifyModelNeed(prompt: string, contextChars = 0, hasImages = 
 
 export function classifyModelError(error: unknown): ModelErrorKind {
   const text = String((error as any)?.message ?? error).toLowerCase();
+  // Plan entitlement first: Z.ai sends "plan does not yet include access" as a 429.
+  if (/(?:does not|doesn't)(?: yet)? include access|(?:do|does) not have access to|no access to (?:this |the )?model/.test(text)) return "access";
   if (/context|too many tokens|token limit|maximum.*token|prompt too long/.test(text)) return "context-limit";
   if (/quota|credit|billing|insufficient.*fund|resource_exhausted/.test(text)) return "quota";
   if (/rate.?limit|too many requests|429/.test(text)) return "rate-limit";
@@ -234,6 +236,11 @@ const MAX_TASK_CHARS = 4_000;
 
 /** Hard cap on any backoff, so a bogus reset header cannot park a model for good. */
 const MAX_BACKOFF_MS = 7 * 24 * 60 * 60 * 1000;
+/**
+ * Error kinds in a failed assistant turn that take the model out of routing.
+ * Context overflow is not one: Pi compacts and retries on the same model.
+ */
+const BACKOFF_KINDS: ReadonlySet<ModelErrorKind> = new Set(["access", "quota", "rate-limit", "unavailable", "timeout"]);
 /** Usage-limit backoff when the provider reports no reset time: assume a full
  * quota window restarts now. Subscription bridges typically use 5-hour
  * windows; everything else falls back to the generic one-hour window. */
@@ -453,6 +460,7 @@ export class AutoModelRouter {
   public enabled: boolean;
   private running = false;
   private blocked = new Map<string, number>();
+  private lastRequest?: { prompt: string; hasImages?: boolean; hasUrls?: boolean };
   private quotaCache?: { at: number; snapshot: QuotaSnapshot };
   private readonly quotaSource?: QuotaSnapshotSource;
   private readonly quotaTtlMs: number;
@@ -480,10 +488,38 @@ export class AutoModelRouter {
   public recordProviderResponse(status: number, model?: Model<any>, headers?: Record<string, string>): ModelErrorKind | undefined {
     if (!model || status < 400) return undefined;
     const kind: ModelErrorKind = status === 408 || status === 504 ? "timeout" : status === 401 || status === 403 ? "auth" : status === 413 ? "context-limit" : status === 429 ? "rate-limit" : status === 402 ? "quota" : status >= 500 ? "unavailable" : "unknown";
-    if (["quota", "rate-limit", "context-limit", "unavailable", "timeout"].includes(kind)) {
+    // A 413 is the one context overflow the router hears about as a status;
+    // Pi does not compact on it, so the model is backed off like the others.
+    if (kind === "context-limit" || BACKOFF_KINDS.has(kind)) {
       this.setBackoff(model, kind, headers);
     }
     return kind;
+  }
+
+  /**
+   * Record a failed assistant turn from its error message. SDK-backed providers
+   * throw on error statuses before after_provider_response fires, so for them
+   * this is the only failure signal. Returns the kind when the model is backed off.
+   */
+  public recordProviderError(errorMessage: string, model?: Model<any>): ModelErrorKind | undefined {
+    if (!model) return undefined;
+    const kind = classifyModelError(errorMessage);
+    if (!BACKOFF_KINDS.has(kind)) return undefined;
+    // Keep a header-informed reset from after_provider_response; only a plan
+    // exclusion outranks it.
+    if (kind === "access" || this.blockedUntil(model) === undefined) this.setBackoff(model, kind);
+    return kind;
+  }
+
+  /**
+   * Re-route the last prompt after the current model was backed off mid-run.
+   * Pi's auto-retry continues on whichever model is current, so switching here
+   * moves the retries off the failing model.
+   */
+  public async failover(ctx: ExtensionContext): Promise<ModelRouteResult | undefined> {
+    if (!this.lastRequest) return undefined;
+    const { prompt, ...options } = this.lastRequest;
+    return this.route(prompt, ctx, options);
   }
 
   /** When the model becomes routable again, or undefined while not blocked. */
@@ -546,7 +582,10 @@ export class AutoModelRouter {
   private setBackoff(model: Model<any>, kind: ModelErrorKind, headers?: Record<string, string>): void {
     const now = Date.now();
     let until: number;
-    if (kind === "quota" || kind === "rate-limit") {
+    if (kind === "access") {
+      // A plan exclusion does not lift with a quota window.
+      until = now + MAX_BACKOFF_MS;
+    } else if (kind === "quota" || kind === "rate-limit") {
       // A usage limit lifts when the quota window restarts: trust the
       // provider's reported reset, otherwise assume a full window from now.
       const reported = reportedResetMs(headers, now);
@@ -719,6 +758,7 @@ export class AutoModelRouter {
 
   /** Every routing outcome — including skips and failures — is recorded here for inspection. */
   public async route(prompt: string, ctx: ExtensionContext, options: { hasImages?: boolean; hasUrls?: boolean; signal?: AbortSignal } = {}): Promise<ModelRouteResult> {
+    this.lastRequest = { prompt, hasImages: options.hasImages, hasUrls: options.hasUrls };
     const result = await this.routeOnce(prompt, ctx, options);
     this.last = result;
     return result;
@@ -775,6 +815,7 @@ export class AutoModelRouter {
       for (const [key, until] of this.blocked) {
         if (until <= now) this.blocked.delete(key);
       }
+      const currentBlocked = current !== undefined && this.blocked.has(candidateKey(current));
       const availablePool = (ctx.scopedModels?.length ? ctx.scopedModels.map((x) => x.model) : ctx.modelRegistry.getAvailable())
         .filter((model) => {
           const until = this.blocked.get(candidateKey(model));
@@ -785,7 +826,7 @@ export class AutoModelRouter {
       const mustUpgradeSuperseded = current !== undefined && generationOf(current.id).length > 0 && pool.some((m) =>
         m.provider === current.provider && tierOf(m) === tierOf(current) && familyOf(m.id) === familyOf(current.id) &&
         compareGeneration(m.id, current.id) < 0);
-      if (need.confidence < ROUTING_CONFIDENCE_THRESHOLD && !allowFrontier && !mustLeaveFrontier && !mustUpgradeSuperseded) {
+      if (need.confidence < ROUTING_CONFIDENCE_THRESHOLD && !allowFrontier && !mustLeaveFrontier && !mustUpgradeSuperseded && !currentBlocked) {
         return { ...fallback, profile: need.profile, reason: need.reason, skipped: "low-confidence" };
       }
       const policyNote = `tier policy: ${allowFrontier ? "frontier explicitly requested" : "tier 5 reserved for explicit frontier requests"}; newest eligible version per provider family in each tier`;
