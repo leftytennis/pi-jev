@@ -544,6 +544,33 @@ test("a malformed overlay warns once and routing falls back to price inference",
   assert.equal(table.get("test/b")?.tier, 4);
 });
 
+test("overlay exclude list keeps a model out of routing even when it is current", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "jev-tiers-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, "tiers.json");
+  fs.writeFileSync(file, JSON.stringify({ exclude: ["test/strong"], tiers: {} }));
+  const strong = model("strong", { reasoning: true, contextWindow: 1000000 });
+  const weak = model("weak", { reasoning: true, contextWindow: 200000 });
+  const router = new AutoModelRouter({ setModel: async () => {} } as any, true, undefined, { tierOverlayPath: file });
+  const result = await router.route("plan a complex review", { ...ctxWith([strong, weak]), model: strong });
+  assert.equal(result.model?.id, "weak");
+  // An unrecognized prompt would otherwise abstain and keep the excluded model.
+  const vague = await router.route("show me the model tier catalog", { ...ctxWith([strong, weak]), model: strong });
+  assert.notEqual(vague.skipped, "low-confidence");
+  assert.equal(vague.model?.id, "weak");
+});
+
+test("a superseded current model in a lower tier is upgraded even on low-confidence prompts", async () => {
+  const older = model("gpt-5.6-sol", { provider: "codex", reasoning: true });
+  const newer = model("gpt-6.1-sol", { provider: "codex", reasoning: true });
+  const router = new AutoModelRouter({ setModel: async () => {} } as any, true, undefined, {
+    tierTable: tiers({ "codex/gpt-5.6-sol": 3, "codex/gpt-6.1-sol": 4 }),
+  });
+  const result = await router.route("show me the model tier catalog", { ...ctxWith([older, newer]), model: older });
+  assert.notEqual(result.skipped, "low-confidence");
+  assert.equal(result.model?.id, "gpt-6.1-sol");
+});
+
 test("a missing overlay file is silent and yields price-inferred tiers", async () => {
   const statuses: string[] = [];
   const ctx: any = {
@@ -1352,7 +1379,7 @@ test("model families strip version, dated alias, and size suffix", () => {
   assert.equal(familyOf("kimi-for-coding"), "kimi-for-coding");
 });
 
-test("tier policy keeps newest version per provider family in every tier, never across tiers or families", () => {
+test("tier policy suppresses older versions per provider family across all tiers", () => {
   const ids = ["claude-sonnet-5", "claude-sonnet-5-5", "claude-opus-4-6", "claude-opus-4-7", "claude-sonnet-4-5", "claude-sonnet-4-6", "claude-fable-5", "claude-fable-5-1"];
   const models = ids.map((id) => model(id, { provider: "claude" }));
   const table = tiers({
@@ -1360,16 +1387,29 @@ test("tier policy keeps newest version per provider family in every tier, never 
     "claude/claude-sonnet-5": 3, "claude/claude-sonnet-5-5": 3, "claude/claude-opus-4-6": 3, "claude/claude-opus-4-7": 3,
     "claude/claude-sonnet-4-5": 2, "claude/claude-sonnet-4-6": 2,
   });
-  // Tier 3 keeps the newest sonnet and the newest opus: sonnet 5.5 does not supersede opus 4.7.
-  // Tier 2's sonnet 4.6 survives although sonnet 5.5 is newer, since tiers are separate lineups.
-  const expected = ["claude-opus-4-7", "claude-sonnet-4-6", "claude-sonnet-5-5"];
+  // Sonnet 5.5 (tier 3) supersedes the tier-2 sonnets too; it does not supersede opus 4.7.
+  const expected = ["claude-opus-4-7", "claude-sonnet-5-5"];
   assert.deepEqual(applyModelTierPolicy(models, table, false).map((m) => m.id).sort(), expected);
   // Frontier opt-in admits tier 5, which is superseded the same way.
   assert.deepEqual(applyModelTierPolicy(models, table, true).map((m) => m.id).sort(), ["claude-fable-5-1", ...expected].sort());
-  // Same tier, different providers: each provider keeps its own newest.
-  const glm = model("glm-4.7", { provider: "zai" });
-  const mixed = applyModelTierPolicy([glm, ...models], tiers({ "zai/glm-4.7": 2, "claude/claude-sonnet-4-6": 2 }), false).map((m) => m.id);
-  assert.ok(mixed.includes("glm-4.7") && mixed.includes("claude-sonnet-4-6"), "4.7 on zai is not superseded by 4.6 or newer on claude");
+  // Versions are never compared across providers.
+  const glm = model("glm-5.2", { provider: "zai" });
+  const mixed = applyModelTierPolicy([glm, ...models], table, false).map((m) => m.id);
+  assert.ok(mixed.includes("glm-5.2"), "5.2 on zai is not superseded by sonnet 5.5 on claude");
+});
+
+test("a frontier-gated newest version leaves the next newest eligible", () => {
+  const models = [model("glm-5.3"), model("glm-5.2"), model("glm-4.7")];
+  const table = tiers({ "test/glm-5.3": 5, "test/glm-5.2": 3, "test/glm-4.7": 3 });
+  assert.deepEqual(applyModelTierPolicy(models, table, false).map((m) => m.id), ["glm-5.2"]);
+  assert.deepEqual(applyModelTierPolicy(models, table, true).map((m) => m.id), ["glm-5.3"]);
+});
+
+test("excluded models never reach routing and do not supersede older versions", () => {
+  const models = [model("gpt-6.1-sol"), model("gpt-5.6-sol"), model("gpt-5.6-terra")];
+  const table = tiers({ "test/gpt-6.1-sol": 4, "test/gpt-5.6-sol": 3, "test/gpt-5.6-terra": 3 });
+  const kept = applyModelTierPolicy(models, table, false, new Set(["test/gpt-6.1-sol", "test/gpt-5.6-terra"]));
+  assert.deepEqual(kept.map((m) => m.id), ["gpt-5.6-sol"]);
 });
 
 test("tier policy leaves unknown or equal versions available for scoring", () => {
@@ -1428,7 +1468,7 @@ for (const mode of ["heuristic", "jev", "failed-jev"] as const) {
     const result = await router.route("plan a review", ctx);
     assert.equal(result.model?.id, latest.id);
     assert.equal(result.changed, true);
-    assert.match(result.reason, /newest eligible version per provider family in each tier/);
+    assert.match(result.reason, /newest eligible version per provider family$/);
     if (mode === "jev") {
       assert.deepEqual(scored, [[latest.id]]);
       assert.match(result.reason, /jev scoring/);

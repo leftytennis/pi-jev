@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Tier overlay file (`~/.pi/agent/jev-model-tiers.json`) now supports an `exclude` array to permanently disable models, separate from tiering. Useful for models the user cannot access.
+
+### Changed
+- **Cross-tier version suppression.** Model suppression now compares versions across all tiers, not just within each tier. Within a provider and family, only the newest version survives routing, whatever its tier. Tier 5 (frontier) models are still gated to explicit frontier requests.
+
 ### Fixed
 - Auto-model now drops a model that fails on SDK-backed providers such as Z.ai. Those providers throw before `after_provider_response` fires, so the router never saw the failure. It now reads the failed turn at `agent_end` and switches models before Pi's auto-retry.
 - Plan-entitlement errors ("subscription plan does not yet include access", sent by Z.ai as a 429) block the model for the session instead of one quota window.
@@ -14,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.6.0] - 2026-09-24
 
+### Added
 - Custom Jev-compatible endpoint support via `PI_JEV_BASE_URL` or `TYPESAFE_BASE_URL`, including unauthenticated local servers such as Laya `laya-serve`.
 - `/jev status` now shows the active Jev endpoint.
 - OpenCode Zen URL-aware model routing.
@@ -24,8 +31,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--jev-auto-model` and `--jev-agents` take effect independently of `/jev auto`.
 - `/jev auto` now sends one Jev request per prompt as documented.
 
+
 ## [0.5.0] - 2026-09-20
 
+### Added
 - **Tool Guard**: Opt-in tool call validation and anti-hallucination interceptor (`--jev-tool-guard`, `PI_JEV_TOOL_GUARD=1`, `/jev tool-guard [on|off]`). Evaluates tool parameters with Jev System One to block hallucinated paths/flags and enhances error output with targeted recovery hints.
 
 ### Fixed
@@ -35,6 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.4.0] - 2026-09-18
 
+### Added
 - Jev Gate CLI binary (`bin/jev-gate.js`, exposed as `pi-jev-gate` and `jev-gate`) for subagent post-run `gate` checks and CI/CD validation. Evaluates git diff, stdin, or files against acceptance criteria with fast System One noul probability.
 - Typed Jev Subagent (`agent: "jev"` / `agentType: "jev"`) handler in `pi-subagents` RPC for sub-second, zero-LLM-overhead choice, score, and probability decisions inside workflows.
 
@@ -43,6 +53,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.3.0] - 2026-09-17
 
+### Added
 - Opt-in automatic model routing via `--jev-auto-model`, `PI_JEV_AUTO_MODEL=1`, and `/jev auto-model [on|off]`.
 - Model profiles for fast, balanced, reasoning, long-context, and vision tasks. Selection respects scoped models and attached images.
 - Provider-limit handling: quota, rate-limit, timeout, unavailable, auth, and context-limit errors are classified; retry-prone models are temporarily avoided on later prompts without loops or silent truncation.
@@ -56,9 +67,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.2.0] - 2026-09-17
 
+### Added
 - Dynamic evaluation command: `/jev test <prompt>` (aliases `/jev eval`, `/jev evaluate`) asks the session's active model to design the Jev question schema from the user's prompt, then runs it on TypeSafe Jev. `/jev test` alone still runs the fixed smoke test.
 - Automatic mode: `--jev-auto` flag / `PI_JEV_AUTO=1` env var and `/jev auto [on|off]` command run one Jev routing pass before each prompt, activating tools and surfacing matching skills.
 
+### Changed
 - Single activation threshold `JEV_THRESHOLD` (0.65) in `src/skills.ts`, used by the router, both tools, `/jev skills`, and auto mode. `/jev skills` previously used 0.6, so manual skill search could show matches auto mode hid.
 
 ### Fixed
@@ -72,10 +85,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.1.1] - 2026-09-17
 
+### Added
 - `jev_find_skill` tool and `/jev skills [query]` command for semantic skill discovery and recommendation.
 
 ## [0.1.0] - 2026-09-17
 
+### Added
 - Initial public release of `pi-jev` package for the Pi coding agent.
 - `jev_find_tools` tool for semantic candidate shortlisting and additive tool activation.
 - `jev_evaluate` tool exposing typed TypeSafe Jev decisions (Choice, Noul, Score).

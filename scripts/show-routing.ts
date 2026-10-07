@@ -67,7 +67,7 @@ const render = (profile: "reasoning" | "fast") => {
   eligible.sort(cmp);
   excluded.sort(cmp);
   console.log(`\n== ${profile} need — precedence: score → demotion → headroom → current → provider → generation → key (Jev confidence slots between demotion and headroom when Jev runs; no current model in this view) ==`);
-  console.log(`Tier policy: frontier ${allowFrontier ? "enabled" : "disabled"}; newest eligible version per provider family in each tier`);
+  console.log(`Tier policy: frontier ${allowFrontier ? "enabled" : "disabled"}; newest eligible version per provider family`);
   console.log(`${"  #"}  ${"model (key)"}  ${"score"}  ${"tier"}  ${"quota"}  headroom`);
   eligible.forEach((r, i) => {
     console.log(

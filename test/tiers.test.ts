@@ -124,3 +124,32 @@ test("inferTiers: ladders are per-provider and never cross-normalized", () => {
   assert.equal(table.get("cheap-vendor/flagship")?.tier, DEFAULT_TIER);
   assert.equal(table.get("dear-vendor/budget")?.tier, DEFAULT_TIER);
 });
+
+test("parseTierOverlay parses the exclude array", () => {
+  const result = parseTierOverlay(JSON.stringify({
+    comment: "exclude test",
+    exclude: ["openai-codex/gpt-6-sol", "zai/glm-5.3-highspeed"],
+    tiers: { "openai-codex/gpt-6-astra": 5 },
+  }));
+  assert.ok("tiers" in result);
+  assert.ok(result.exclude.has("openai-codex/gpt-6-sol"));
+  assert.ok(result.exclude.has("zai/glm-5.3-highspeed"));
+  assert.equal(result.exclude.size, 2);
+});
+
+test("parseTierOverlay rejects malformed exclude entries", () => {
+  for (const raw of [
+    JSON.stringify({ tiers: {}, exclude: "not an array" }),
+    JSON.stringify({ tiers: {}, exclude: [1, 2] }),
+    JSON.stringify({ tiers: {}, exclude: ["valid", 123] }),
+  ]) {
+    const result = parseTierOverlay(raw);
+    assert.ok("error" in result, `expected rejection for ${raw}`);
+  }
+});
+
+test("parseTierOverlay omits exclude when not present", () => {
+  const result = parseTierOverlay(JSON.stringify({ tiers: {} }));
+  assert.ok("tiers" in result);
+  assert.equal(result.exclude.size, 0);
+});
