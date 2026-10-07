@@ -158,7 +158,7 @@ Auto-model uses task signals, attached images, and context size to classify the 
 ## Commands
 
 - `/jev status` — Shows Jev configuration, endpoint, API key origin, auto-mode state, session request count, total tokens, and available tool counts.
-- `/jev catalog` — Lists each authenticated provider's models in aligned columns (quality tier, type, context window, input modalities, price, session usage), grouped by routing status: eligible, frontier only, suppressed by a newer version in the same family (one line per replacement), or excluded by the tier file. The header totals each status. Also `/jev models`.
+- `/jev catalog` — Lists the models auto-model can route to, grouped by quality tier from 5 (flagship, frontier requests only) down to 1 (budget), with provider, type, context window, input modalities, price, and session usage in aligned columns. Models routing will not use follow: suppressed versions, one line per newer replacement, then models excluded by the tier file. The header totals each status and names each authenticated provider. Also `/jev models`.
 - `/jev usage` — Reads each authenticated platform's own quota windows and shows how much of each is used: Claude (5-hour, weekly, per-model weekly), OpenAI Codex (whatever windows the account reports, typically 5-hour and weekly), Z.ai (5-hour and weekly credits), Kimi Code (5-hour and monthly). Also `/jev quota`. Windows at 90% or more are flagged and the notice becomes a warning. Endpoints and credential sources are documented in `docs/provider-usage-endpoints.md`.
 - `/jev help` — Lists available subcommands.
 - `/jev skills [query]` — Discover and rank matching skills in the workspace using Jev.
