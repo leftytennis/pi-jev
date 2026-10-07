@@ -167,3 +167,26 @@ test("successful and aborted runs leave routing alone", async (t) => {
   }
   assert.deepEqual(selected, []);
 });
+
+test("thinking mode sets the reasoning level after model routing and keeps the routing status visible", async (t) => {
+  const model = zaiModel("glm-5.3", { reasoning: true });
+  const levels: string[] = [];
+  const ext = loadExtension(t, { "jev-auto-model": true, "jev-thinking": true }, {
+    setModel: async () => true,
+    setThinkingLevel: (level: string) => { levels.push(level); },
+  });
+  const statuses: string[] = [];
+  const ctx: any = {
+    model,
+    thinkingLevel: "medium",
+    modelRegistry: { getAvailable: () => [model], getProviderAuthStatus: () => ({ configured: false }) },
+    getSystemPrompt: () => "",
+    ui: { setStatus: (_key: string, text: string) => statuses.push(text), notify: () => {} },
+  };
+  await ext.hooks.get("before_agent_start")!({ prompt: "debug this failing test and find the root cause" }, ctx);
+  assert.equal(levels.length, 1);
+  assert.notEqual(levels[0], "medium");
+  // The model-routing outcome is shown first and the level change is appended, not swapped in.
+  assert.equal(statuses.length, 2);
+  assert.equal(statuses[1], `${statuses[0]} · thinking medium → ${levels[0]}`);
+});
