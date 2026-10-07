@@ -562,6 +562,11 @@ export class AutoModelRouter {
     return this.tierTableCache;
   }
 
+  /** Resolved quality tiers and explicit exclusions used by catalog output. */
+  public catalogPolicy(ctx: TierContext): TierOverlay {
+    return { tiers: this.tiersFor(ctx), exclude: this.overlayFor(ctx).exclude };
+  }
+
   /**
    * Quota pressure per provider, read from the platforms' own usage endpoints
    * and cached for quotaTtlMs. A failed poll serves the previous snapshot for
