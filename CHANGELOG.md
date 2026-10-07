@@ -17,8 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Auto-model now drops a model that fails on SDK-backed providers such as Z.ai. Those providers throw before `after_provider_response` fires, so the router never saw the failure. It now reads the failed turn at `agent_end` and switches models before Pi's auto-retry.
-- Plan-entitlement errors ("subscription plan does not yet include access", sent by Z.ai as a 429) block the model for the session instead of one quota window.
+- Plan-entitlement errors ("subscription plan does not yet include access", sent by Z.ai as a 429, or "you do not have access to this model") back the model off for 7 days instead of one quota window. Backoffs are kept in memory, so in practice this lasts the rest of the session. Missing access to an organization or API does not count.
 - An unrecognized prompt no longer keeps a backed-off current model; routing leaves it even when it would otherwise abstain.
+- With auto-model off, a failed turn is still recorded, but no longer sets a "fallback" status for a switch that will not happen.
 
 ## [0.6.0] - 2026-09-24
 
