@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `/jev catalog` now shows each authenticated model's resolved quality tier and routing status: enabled, frontier-only, explicitly excluded, or suppressed by a newer model in the same provider family.
 - Tier overlay file (`~/.pi/agent/jev-model-tiers.json`) now supports an `exclude` array to permanently disable models, separate from tiering. Useful for models the user cannot access.
 
 ### Changed

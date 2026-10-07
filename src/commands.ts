@@ -75,7 +75,7 @@ export function registerJevCommands(
 
       if (sub === "catalog" || sub === "models") {
         try {
-          ctx.ui.notify(renderCatalog(ctx, autoModel?.tiersFor(ctx)), "info");
+          ctx.ui.notify(renderCatalog(ctx, autoModel?.catalogPolicy(ctx)), "info");
         } catch (err: any) {
           ctx.ui.notify(`Could not build model catalog: ${err?.message || err}`, "error");
         }

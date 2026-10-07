@@ -1,5 +1,6 @@
 import type { Model } from "@earendil-works/pi-ai";
-import type { TierTable } from "./tiers.js";
+import { applyModelTierPolicy, supersedes } from "./model-router.js";
+import type { TierOverlay } from "./tiers.js";
 
 /**
  * Capability tier derived from registry metadata only — never from model or
@@ -131,13 +132,61 @@ export interface CatalogContext {
   sessionManager: { getEntries(): unknown[] };
 }
 
+type RoutingStatus =
+  | { kind: "enabled" }
+  | { kind: "frontier" }
+  | { kind: "excluded" }
+  | { kind: "suppressed"; by: string };
+
+function modelKey(model: Model<any>): string {
+  return `${model.provider}/${model.id}`;
+}
+
+/** Apply the same model policy as routing and explain why each model survives or not. */
+function routingStatuses(models: Model<any>[], policy: TierOverlay | undefined): Map<string, RoutingStatus> {
+  const statuses = new Map<string, RoutingStatus>();
+  if (!policy) return statuses;
+
+  const ordinary = applyModelTierPolicy(models, policy.tiers, false, policy.exclude);
+  const frontier = applyModelTierPolicy(models, policy.tiers, true, policy.exclude);
+  const ordinaryKeys = new Set(ordinary.map(modelKey));
+  const frontierKeys = new Set(frontier.map(modelKey));
+
+  for (const model of models) {
+    const key = modelKey(model);
+    if (policy.exclude.has(key)) {
+      statuses.set(key, { kind: "excluded" });
+    } else if (ordinaryKeys.has(key)) {
+      statuses.set(key, { kind: "enabled" });
+    } else if (frontierKeys.has(key)) {
+      statuses.set(key, { kind: "frontier" });
+    } else {
+      const replacement = ordinary.find((candidate) => supersedes(candidate, model))
+        ?? frontier.find((candidate) => supersedes(candidate, model));
+      statuses.set(key, replacement ? { kind: "suppressed", by: replacement.id } : { kind: "enabled" });
+    }
+  }
+  return statuses;
+}
+
+function routingLabel(status: RoutingStatus): string {
+  switch (status.kind) {
+    case "enabled": return "enabled";
+    case "frontier": return "frontier only";
+    case "excluded": return "excluded";
+    case "suppressed": return `suppressed by ${status.by}`;
+  }
+}
+
 /**
  * Render the session's model catalog: authenticated providers and their
- * models with tier, capability metadata, and this session's attributable
- * cost per model. Providers without configured auth are counted, not listed.
+ * models with tier, routing eligibility, capability metadata, and this
+ * session's attributable cost per model. Providers without configured auth
+ * are counted, not listed.
  */
-export function renderCatalog(ctx: CatalogContext, tiers?: TierTable): string {
+export function renderCatalog(ctx: CatalogContext, policy?: TierOverlay): string {
   const models = ctx.modelRegistry.getAvailable();
+  const statuses = routingStatuses(models, policy);
   const costs = sessionCosts(ctx.sessionManager.getEntries() as EntrySlice[]);
   const costByKey = new Map(costs.lines.map((line) => [line.key, line]));
   const matchedKeys = new Set<string>();
@@ -176,8 +225,10 @@ export function renderCatalog(ctx: CatalogContext, tiers?: TierTable): string {
           formatPricing(model),
         ];
         // The quality axis is omitted when nothing is known, not rendered as noise.
-        const quality = tiers?.get(`${model.provider}/${model.id}`);
+        const quality = policy?.tiers.get(key);
         if (quality && quality.basis !== "default") parts.push(`quality: ${quality.tier}/5 (${quality.basis})`);
+        const routing = statuses.get(key);
+        if (routing) parts.push(`routing: ${routingLabel(routing)}`);
         if (line) parts.push(`session: ${formatUsd(line.cost)} (${formatTokens(line.tokens)} tok)`);
         const current = ctx.model?.provider === model.provider && ctx.model?.id === model.id;
         return `  • ${model.id} — ${parts.join(" · ")}${current ? "  ← current" : ""}`;
@@ -185,7 +236,18 @@ export function renderCatalog(ctx: CatalogContext, tiers?: TierTable): string {
     sections.push(`${ctx.modelRegistry.getProviderDisplayName(provider)} (auth: ${auth}):\n${rows.join("\n")}`);
   }
 
-  const header = `Model catalog — ${authenticated.length} authenticated provider(s), ${sections.reduce((n, s) => n + s.split("\n").length - 1, 0)} model(s):`;
+  const shownModels = [...byProvider.entries()]
+    .filter(([provider]) => ctx.modelRegistry.getProviderAuthStatus(provider).configured)
+    .flatMap(([, group]) => group);
+  const statusCounts = { enabled: 0, frontier: 0, suppressed: 0, excluded: 0 };
+  for (const model of shownModels) {
+    const status = statuses.get(modelKey(model));
+    if (status) statusCounts[status.kind] += 1;
+  }
+  const policySummary = policy
+    ? ` ${statusCounts.enabled} enabled · ${statusCounts.frontier} frontier-only · ${statusCounts.suppressed} suppressed · ${statusCounts.excluded} excluded`
+    : "";
+  const header = `Model catalog — ${authenticated.length} authenticated provider(s), ${shownModels.length} model(s):${policySummary}`;
   const out: string[] = [header, "", ...sections.flatMap((s) => [s, ""])];
 
   const unmatched = costs.lines.filter((line) => !matchedKeys.has(line.key));
