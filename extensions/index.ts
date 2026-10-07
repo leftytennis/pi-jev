@@ -11,6 +11,7 @@ import { JevCompactor } from "../src/compact.js";
 import { AgentOrchestrator } from "../src/orchestrator.js";
 import { JevAgentHandler } from "../src/agent.js";
 import { ToolGuard } from "../src/tool-guard.js";
+import { AutoThinkingRouter } from "../src/thinking.js";
 
 function envAutoEnabledFor(name: string): boolean {
   const raw = process.env[name]?.trim().toLowerCase();
@@ -50,6 +51,13 @@ export default function (pi: ExtensionAPI) {
     default: envAutoEnabledFor("PI_JEV_AUTO_MODEL"),
   });
 
+  pi.registerFlag("jev-thinking", {
+    description:
+      "Classify each prompt and set the reasoning level (escalate for planning/debugging, de-escalate for short mechanical tasks) without changing the model",
+    type: "boolean",
+    default: envAutoEnabledFor("PI_JEV_THINKING"),
+  });
+
   pi.registerFlag("jev-auto", {
     description:
       "Automatically route Pi tools and suggest skills with Jev on every prompt (also via PI_JEV_AUTO=1)",
@@ -64,6 +72,7 @@ export default function (pi: ExtensionAPI) {
     Boolean(pi.getFlag("jev-auto"))
   );
   const autoModel = new AutoModelRouter(pi, Boolean(pi.getFlag("jev-auto-model")), jevClient);
+  const autoThinking = new AutoThinkingRouter(pi, Boolean(pi.getFlag("jev-thinking")));
   const compactor = new JevCompactor(jevClient, Boolean(pi.getFlag("jev-compact")));
   const agents = new AgentOrchestrator(pi, jevClient, Boolean(pi.getFlag("jev-agents")));
   agents.installCompletionNotice();
@@ -75,7 +84,7 @@ export default function (pi: ExtensionAPI) {
   agentHandler.install();
 
   registerJevTools(pi, jevClient, router, skillRouter);
-  registerJevCommands(pi, jevClient, router, skillRouter, auto, autoModel, compactor, agents, toolGuard);
+  registerJevCommands(pi, jevClient, router, skillRouter, auto, autoModel, compactor, agents, toolGuard, autoThinking);
 
   pi.on("session_start", (_event, ctx) => {
     if (!jevClient.isConfigured()) {
@@ -135,8 +144,12 @@ export default function (pi: ExtensionAPI) {
     ctx.ui.setStatus("jev", `jev: ${kind} → ${routed?.changed ? routed.model?.id : backoffDetail(failed)}`);
   });
 
+  pi.on("thinking_level_select", (event) => {
+    autoThinking.observe(event.level, event.previousLevel);
+  });
+
   pi.on("before_agent_start", async (event, ctx) => {
-    let modelStatus: string | undefined;
+    let routeStatus: string | undefined;
     if (autoModel.enabled) {
       // Cancellation note: the host creates the agent run (and its abort signal)
       // only after this hook returns, so ctx.signal is typically undefined here.
@@ -145,8 +158,16 @@ export default function (pi: ExtensionAPI) {
       // internal timeout. True preflight cancellation needs host support.
       const modelResult = await autoModel.route(event.prompt, ctx, { hasImages: Boolean(event.images?.length), hasUrls: Boolean((event as any).urls?.length), signal: ctx.signal });
       // Always reflect the outcome: a skip or failed switch must be visible, not silent.
-      modelStatus = describeRouteStatus(modelResult);
-      ctx.ui.setStatus("jev", modelStatus);
+      routeStatus = describeRouteStatus(modelResult);
+      ctx.ui.setStatus("jev", routeStatus);
+    }
+
+    // After model routing, so the level is clamped to the model that will run.
+    const thinkingResult = await autoThinking.route(event.prompt, ctx);
+    if (thinkingResult.changed) {
+      const thinkingStatus = `thinking ${thinkingResult.previous ?? "?"} → ${thinkingResult.level}`;
+      routeStatus = routeStatus ? `${routeStatus} · ${thinkingStatus}` : `jev: ${thinkingStatus}`;
+      ctx.ui.setStatus("jev", routeStatus);
     }
 
     if (agents.enabled && /\b(architecture|refactor|security review|entire repo|parallel|multiple agents|complex migration)\b/i.test(event.prompt)) {
@@ -161,7 +182,7 @@ export default function (pi: ExtensionAPI) {
     if (result.activated.length > 0) {
       // Compose with the model-routing status instead of overwriting the shared
       // slot, so a routing failure or abstention stays visible when both run.
-      ctx.ui.setStatus("jev", modelStatus ? `${modelStatus} (+${result.activated.length} tools)` : `jev: auto (+${result.activated.length} tools)`);
+      ctx.ui.setStatus("jev", routeStatus ? `${routeStatus} (+${result.activated.length} tools)` : `jev: auto (+${result.activated.length} tools)`);
     }
 
     if (result.skills.length === 0) return;
