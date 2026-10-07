@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-07
+
 ### Added
 - `/jev catalog` groups the models auto-model can route to by quality tier, highest first, across all providers, in aligned columns. Suppressed versions (one line per newer replacement) and models excluded by the tier file are listed after the tiers, and the header totals each status.
 - Tier overlay file (`~/.pi/agent/jev-model-tiers.json`) now supports an `exclude` array to permanently disable models, separate from tiering. Useful for models the user cannot access.
