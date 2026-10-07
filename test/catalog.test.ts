@@ -120,7 +120,7 @@ test("renderCatalog: lists authenticated models in aligned columns with cost and
   ].join("\n"));
 });
 
-test("renderCatalog: groups models by routing status, highest quality first", () => {
+test("renderCatalog: groups models by tier, highest first, with suppressed and excluded models last", () => {
   const models = [
     model({ provider: "anthropic", id: "claude-opus-5-5" }),
     model({ provider: "anthropic", id: "claude-opus-5" }),
@@ -152,31 +152,37 @@ test("renderCatalog: groups models by routing status, highest quality first", ()
     exclude: new Set(["anthropic/claude-sonnet-5-5"]),
   };
   assert.equal(renderCatalog(ctx as any, policy as any), [
-    "Model catalog — 1 provider, 7 models",
-    "Routing: 3 eligible · 1 frontier only · 2 suppressed · 1 excluded",
-    "Quality runs 1–5 and ranks models for routing; * means inferred from price, not set in the tier file.",
+    "Model catalog — 1 provider, 7 models: 3 eligible · 1 frontier only · 2 suppressed · 1 excluded",
+    "Providers: anthropic (auth: stored)",
+    "Tiers rank quality from 1 (budget) to 5 (flagship). * tier inferred from price, not set in the tier file.",
     "Price is $ per million tokens, input / output.",
     "",
-    "anthropic (auth: stored)",
-    "  MODEL               QUALITY  TYPE      CONTEXT  INPUT  PRICE",
-    "  Eligible",
-    "    claude-opus-5-5   4        balanced  200k     text   $5 / $15",
-    "    claude-sonnet-5   3        balanced  200k     text   $5 / $15",
-    "    claude-haiku-4-5  1*       balanced  200k     text   $5 / $15",
-    "  Frontier only — used when a prompt asks for a frontier model",
-    "    claude-fable-5-1  5        fast      200k     text   $0",
-    "  Suppressed — a newer version is used instead",
-    "    claude-opus-5 (current), claude-opus-4-8 → claude-opus-5-5",
-    "  Excluded by the tier file",
-    "    claude-sonnet-5-5",
+    "  MODEL               PROVIDER   TYPE      CONTEXT  INPUT  PRICE",
+    "Tier 5 · flagship — frontier only, used when a prompt asks for a frontier model",
+    "  claude-fable-5-1    anthropic  fast      200k     text   $0",
+    "",
+    "Tier 4 · premium",
+    "  claude-opus-5-5     anthropic  balanced  200k     text   $5 / $15",
+    "",
+    "Tier 3 · standard",
+    "  claude-sonnet-5     anthropic  balanced  200k     text   $5 / $15",
+    "",
+    "Tier 1 · budget",
+    "  claude-haiku-4-5 *  anthropic  balanced  200k     text   $5 / $15",
+    "",
+    "Suppressed — a newer version is used instead",
+    "  anthropic  claude-opus-5 (current), claude-opus-4-8 → claude-opus-5-5",
+    "",
+    "Excluded by the tier file",
+    "  anthropic  claude-sonnet-5-5",
     "",
     "Session cost: $0.00 (0 tokens)",
   ].join("\n"));
 });
 
-test("renderCatalog: no policy means no routing groups or quality column", () => {
+test("renderCatalog: no policy means per-provider tables without tier sections", () => {
   const text = renderCatalog(catalogCtx() as any);
-  assert.doesNotMatch(text, /Routing:|QUALITY|Eligible|Suppressed/);
+  assert.doesNotMatch(text, /Tier \d|PROVIDER|Suppressed|Excluded/);
 });
 
 test("/jev catalog: command renders the catalog through ctx.ui.notify", async () => {
@@ -214,9 +220,9 @@ test("/jev catalog: command renders the catalog through ctx.ui.notify", async ()
   await handler!("catalog", ctx);
   assert.equal(calls.length, 1);
   assert.equal(calls[0].level, "info");
-  assert.match(calls[0].message, /^Model catalog — 1 provider, 2 models\nRouting: 0 eligible · 1 frontier only · 0 suppressed · 1 excluded/);
-  assert.match(calls[0].message, /Frontier only — used when a prompt asks for a frontier model\n    claude-opus-5-5 +5 /);
-  assert.match(calls[0].message, /Excluded by the tier file\n    claude-haiku-4-5\n/);
+  assert.match(calls[0].message, /^Model catalog — 1 provider, 2 models: 0 eligible · 1 frontier only · 0 suppressed · 1 excluded\n/);
+  assert.match(calls[0].message, /Tier 5 · flagship — frontier only, used when a prompt asks for a frontier model\n  claude-opus-5-5 +anthropic /);
+  assert.match(calls[0].message, /Excluded by the tier file\n  anthropic  claude-haiku-4-5\n/);
 
   // A registry failure surfaces as an error, never a silent no-op.
   const broken = {
