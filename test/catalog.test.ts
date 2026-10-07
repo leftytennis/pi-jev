@@ -103,67 +103,80 @@ function catalogCtx() {
   };
 }
 
-test("renderCatalog: lists authenticated models with tier, cost, and current marker", () => {
+test("renderCatalog: lists authenticated models in aligned columns with cost and current marker", () => {
   const text = renderCatalog(catalogCtx() as any);
-  assert.match(text, /1 authenticated provider\(s\), 2 model\(s\)/);
-  assert.match(text, /anthropic \(auth: stored\):/);
-  assert.match(text, /claude-opus-5-5 — tier: reasoning · ctx 200k · text\+image · \$5\/\$15 per MTok · session: \$1\.25 \(1,000 tok\)  ← current/);
-  assert.match(text, /claude-haiku-4-5 — tier: fast/);
-  assert.match(text, /Session cost: \$1\.35 \(1,010 tokens\)/);
-  // Usage from a model no longer in the registry still shows up, unmatched.
-  assert.match(text, /• gone\/retired: \$0\.10 \(10 tok\)/);
-  assert.match(text, /Not shown: 1 model\(s\) from 1 provider\(s\) without configured auth\./);
-  assert.doesNotMatch(text, /mystery/);
+  assert.equal(text, [
+    "Model catalog — 1 provider, 2 models",
+    "Price is $ per million tokens, input / output.",
+    "",
+    "anthropic (auth: stored)",
+    "  MODEL               TYPE       CONTEXT  INPUT       PRICE      SESSION",
+    "    claude-haiku-4-5  fast       200k     text        $0.8 / $4",
+    "    claude-opus-5-5   reasoning  200k     text+image  $5 / $15   $1.25 · 1,000 tok  ← current",
+    "",
+    "Session cost: $1.35 (1,010 tokens)",
+    "  • gone/retired: $0.10 (10 tok)",
+    "Not shown: 1 model(s) from 1 provider(s) without configured auth.",
+  ].join("\n"));
 });
 
-test("renderCatalog: quality tiers shown with basis, default basis omitted", () => {
-  const policy = {
-    tiers: new Map([
-      ["anthropic/claude-opus-5-5", { tier: 5, basis: "configured" }],
-      ["anthropic/claude-haiku-4-5", { tier: 2, basis: "price-inferred" }],
-    ]),
-    exclude: new Set<string>(),
-  };
-  const text = renderCatalog(catalogCtx() as any, policy as any);
-  assert.match(text, /claude-opus-5-5 — tier: reasoning · ctx 200k · text\+image · \$5\/\$15 per MTok · quality: 5\/5 \(configured\) · routing: frontier only/);
-  assert.match(text, /claude-haiku-4-5 — tier: fast · ctx 200k · text · \$0\.8\/\$4 per MTok · quality: 2\/5 \(price-inferred\) · routing: enabled/);
-  // Without a policy the rows are byte-identical to before.
-  assert.doesNotMatch(renderCatalog(catalogCtx() as any), /quality:|routing:/);
-});
-
-test("renderCatalog: labels enabled, frontier, excluded, and superseded models", () => {
+test("renderCatalog: groups models by routing status, highest quality first", () => {
   const models = [
     model({ provider: "anthropic", id: "claude-opus-5-5" }),
     model({ provider: "anthropic", id: "claude-opus-5" }),
-    model({ provider: "anthropic", id: "claude-fable-5-1" }),
+    model({ provider: "anthropic", id: "claude-opus-4-8" }),
+    model({ provider: "anthropic", id: "claude-fable-5-1", cost: { input: 0, output: 0 } }),
     model({ provider: "anthropic", id: "claude-sonnet-5-5" }),
     model({ provider: "anthropic", id: "claude-sonnet-5" }),
+    model({ provider: "anthropic", id: "claude-haiku-4-5" }),
   ];
   const ctx = {
-    ...catalogCtx(), model: models[0],
+    ...catalogCtx(), model: models[1],
     modelRegistry: {
       getAvailable: () => models,
       getProviderAuthStatus: () => ({ configured: true, source: "stored" }),
       getProviderDisplayName: (provider: string) => provider,
     },
+    sessionManager: { getEntries: () => [] },
   };
   const policy = {
     tiers: new Map([
       ["anthropic/claude-opus-5-5", { tier: 4, basis: "configured" }],
       ["anthropic/claude-opus-5", { tier: 4, basis: "configured" }],
+      ["anthropic/claude-opus-4-8", { tier: 3, basis: "configured" }],
       ["anthropic/claude-fable-5-1", { tier: 5, basis: "configured" }],
       ["anthropic/claude-sonnet-5-5", { tier: 3, basis: "configured" }],
       ["anthropic/claude-sonnet-5", { tier: 3, basis: "configured" }],
+      ["anthropic/claude-haiku-4-5", { tier: 1, basis: "price-inferred" }],
     ]),
     exclude: new Set(["anthropic/claude-sonnet-5-5"]),
   };
-  const text = renderCatalog(ctx as any, policy as any);
-  assert.match(text, /5 model\(s\): 2 enabled · 1 frontier-only · 1 suppressed · 1 excluded/);
-  assert.match(text, /claude-opus-5-5 .* routing: enabled/);
-  assert.match(text, /claude-opus-5 .* routing: suppressed by claude-opus-5-5/);
-  assert.match(text, /claude-fable-5-1 .* routing: frontier only/);
-  assert.match(text, /claude-sonnet-5-5 .* routing: excluded/);
-  assert.match(text, /claude-sonnet-5 .* routing: enabled/, "an excluded latest version does not suppress the older one");
+  assert.equal(renderCatalog(ctx as any, policy as any), [
+    "Model catalog — 1 provider, 7 models",
+    "Routing: 3 eligible · 1 frontier only · 2 suppressed · 1 excluded",
+    "Quality runs 1–5 and ranks models for routing; * means inferred from price, not set in the tier file.",
+    "Price is $ per million tokens, input / output.",
+    "",
+    "anthropic (auth: stored)",
+    "  MODEL               QUALITY  TYPE      CONTEXT  INPUT  PRICE",
+    "  Eligible",
+    "    claude-opus-5-5   4        balanced  200k     text   $5 / $15",
+    "    claude-sonnet-5   3        balanced  200k     text   $5 / $15",
+    "    claude-haiku-4-5  1*       balanced  200k     text   $5 / $15",
+    "  Frontier only — used when a prompt asks for a frontier model",
+    "    claude-fable-5-1  5        fast      200k     text   $0",
+    "  Suppressed — a newer version is used instead",
+    "    claude-opus-5 (current), claude-opus-4-8 → claude-opus-5-5",
+    "  Excluded by the tier file",
+    "    claude-sonnet-5-5",
+    "",
+    "Session cost: $0.00 (0 tokens)",
+  ].join("\n"));
+});
+
+test("renderCatalog: no policy means no routing groups or quality column", () => {
+  const text = renderCatalog(catalogCtx() as any);
+  assert.doesNotMatch(text, /Routing:|QUALITY|Eligible|Suppressed/);
 });
 
 test("/jev catalog: command renders the catalog through ctx.ui.notify", async () => {
@@ -201,9 +214,9 @@ test("/jev catalog: command renders the catalog through ctx.ui.notify", async ()
   await handler!("catalog", ctx);
   assert.equal(calls.length, 1);
   assert.equal(calls[0].level, "info");
-  assert.match(calls[0].message, /Model catalog — 1 authenticated provider\(s\), 2 model\(s\): 0 enabled · 1 frontier-only · 0 suppressed · 1 excluded/);
-  assert.match(calls[0].message, /claude-opus-5-5 .* quality: 5\/5 \(configured\) · routing: frontier only/);
-  assert.match(calls[0].message, /claude-haiku-4-5 .* routing: excluded/);
+  assert.match(calls[0].message, /^Model catalog — 1 provider, 2 models\nRouting: 0 eligible · 1 frontier only · 0 suppressed · 1 excluded/);
+  assert.match(calls[0].message, /Frontier only — used when a prompt asks for a frontier model\n    claude-opus-5-5 +5 /);
+  assert.match(calls[0].message, /Excluded by the tier file\n    claude-haiku-4-5\n/);
 
   // A registry failure surfaces as an error, never a silent no-op.
   const broken = {

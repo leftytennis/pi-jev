@@ -1,5 +1,5 @@
 import type { Model } from "@earendil-works/pi-ai";
-import { applyModelTierPolicy, supersedes } from "./model-router.js";
+import { applyModelTierPolicy, compareGeneration, supersedes } from "./model-router.js";
 import type { TierOverlay } from "./tiers.js";
 
 /**
@@ -107,16 +107,19 @@ export function formatTokens(value: number): string {
 }
 
 function formatContextWindow(tokens: number | undefined): string {
-  if (!tokens) return "ctx ?";
-  return tokens >= 1000 ? `ctx ${Math.round(tokens / 1000)}k` : `ctx ${tokens}`;
+  if (!tokens) return "?";
+  if (tokens >= 1_000_000) return `${+(tokens / 1_000_000).toFixed(1)}M`;
+  return tokens >= 1000 ? `${Math.round(tokens / 1000)}k` : String(tokens);
 }
 
 function formatPricing(model: Model<any>): string {
   const input = model.cost?.input;
   const output = model.cost?.output;
-  if (typeof input !== "number" && typeof output !== "number") return "cost ?";
+  if (typeof input !== "number" && typeof output !== "number") return "?";
+  // Subscription-bridged models are zero-priced; one "$0" reads better than "$0 / $0".
+  if (input === 0 && output === 0) return "$0";
   const fmt = (v: unknown) => (typeof v === "number" ? `$${v}` : "?");
-  return `${fmt(input)}/${fmt(output)} per MTok`;
+  return `${fmt(input)} / ${fmt(output)}`;
 }
 
 /** The registry surface the catalog reads; a structural type so tests can fake it. */
@@ -133,63 +136,74 @@ export interface CatalogContext {
 }
 
 type RoutingStatus =
-  | { kind: "enabled" }
+  | { kind: "eligible" }
   | { kind: "frontier" }
   | { kind: "excluded" }
-  | { kind: "suppressed"; by: string };
+  | { kind: "suppressed"; by: Model<any> };
 
 function modelKey(model: Model<any>): string {
   return `${model.provider}/${model.id}`;
 }
 
 /** Apply the same model policy as routing and explain why each model survives or not. */
-function routingStatuses(models: Model<any>[], policy: TierOverlay | undefined): Map<string, RoutingStatus> {
-  const statuses = new Map<string, RoutingStatus>();
-  if (!policy) return statuses;
-
+function routingStatuses(models: Model<any>[], policy: TierOverlay): Map<string, RoutingStatus> {
   const ordinary = applyModelTierPolicy(models, policy.tiers, false, policy.exclude);
   const frontier = applyModelTierPolicy(models, policy.tiers, true, policy.exclude);
   const ordinaryKeys = new Set(ordinary.map(modelKey));
   const frontierKeys = new Set(frontier.map(modelKey));
 
+  const statuses = new Map<string, RoutingStatus>();
   for (const model of models) {
     const key = modelKey(model);
     if (policy.exclude.has(key)) {
       statuses.set(key, { kind: "excluded" });
     } else if (ordinaryKeys.has(key)) {
-      statuses.set(key, { kind: "enabled" });
+      statuses.set(key, { kind: "eligible" });
     } else if (frontierKeys.has(key)) {
       statuses.set(key, { kind: "frontier" });
     } else {
       const replacement = ordinary.find((candidate) => supersedes(candidate, model))
         ?? frontier.find((candidate) => supersedes(candidate, model));
-      statuses.set(key, replacement ? { kind: "suppressed", by: replacement.id } : { kind: "enabled" });
+      statuses.set(key, replacement ? { kind: "suppressed", by: replacement } : { kind: "eligible" });
     }
   }
   return statuses;
 }
 
-function routingLabel(status: RoutingStatus): string {
-  switch (status.kind) {
-    case "enabled": return "enabled";
-    case "frontier": return "frontier only";
-    case "excluded": return "excluded";
-    case "suppressed": return `suppressed by ${status.by}`;
-  }
+/** Pad every column but the last to its widest cell; columns empty in every row are dropped. */
+function alignColumns(rows: string[][]): string[] {
+  const width = Math.max(...rows.map((row) => row.length));
+  const keep = Array.from({ length: width }, (_, col) => rows.slice(1).some((row) => (row[col] ?? "") !== ""));
+  keep[0] = true;
+  const kept = rows.map((row) => row.filter((_, col) => keep[col]));
+  const widths = kept[0].map((_, col) => Math.max(...kept.map((row) => (row[col] ?? "").length)));
+  return kept.map((row) => row.map((cell, col) => (col === row.length - 1 ? cell : cell.padEnd(widths[col]))).join("  ").trimEnd());
 }
+
+function plural(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? "" : "s"}`;
+}
+
+const GROUP_TITLES = {
+  frontier: "Frontier only — used when a prompt asks for a frontier model",
+  suppressed: "Suppressed — a newer version is used instead",
+  excluded: "Excluded by the tier file",
+} as const;
 
 /**
  * Render the session's model catalog: authenticated providers and their
- * models with tier, routing eligibility, capability metadata, and this
- * session's attributable cost per model. Providers without configured auth
- * are counted, not listed.
+ * models in aligned columns, grouped by routing status when a tier policy is
+ * supplied, with this session's attributable cost per model. Providers
+ * without configured auth are counted, not listed.
  */
 export function renderCatalog(ctx: CatalogContext, policy?: TierOverlay): string {
   const models = ctx.modelRegistry.getAvailable();
-  const statuses = routingStatuses(models, policy);
+  const statuses = policy ? routingStatuses(models, policy) : undefined;
   const costs = sessionCosts(ctx.sessionManager.getEntries() as EntrySlice[]);
   const costByKey = new Map(costs.lines.map((line) => [line.key, line]));
   const matchedKeys = new Set<string>();
+  const isCurrent = (model: Model<any>) => ctx.model?.provider === model.provider && ctx.model?.id === model.id;
+  const qualityOf = (model: Model<any>) => policy?.tiers.get(modelKey(model));
 
   const byProvider = new Map<string, Model<any>[]>();
   for (const model of models) {
@@ -198,10 +212,11 @@ export function renderCatalog(ctx: CatalogContext, policy?: TierOverlay): string
     byProvider.set(model.provider, group);
   }
 
-  const authenticated: string[] = [];
+  const shown: Model<any>[] = [];
   let unauthenticatedProviders = 0;
   let unauthenticatedModels = 0;
-  const sections: string[] = [];
+  let inferredQuality = false;
+  const sections: string[][] = [];
 
   for (const [provider, group] of [...byProvider.entries()].sort(([a], [b]) => a.localeCompare(b))) {
     const status = ctx.modelRegistry.getProviderAuthStatus(provider);
@@ -210,58 +225,93 @@ export function renderCatalog(ctx: CatalogContext, policy?: TierOverlay): string
       unauthenticatedModels += group.length;
       continue;
     }
-    authenticated.push(provider);
+    shown.push(...group);
+
+    const tableRow = (model: Model<any>): string[] => {
+      const key = modelKey(model);
+      const line = costByKey.get(key);
+      if (line) matchedKeys.add(key);
+      const quality = qualityOf(model);
+      const inferred = quality?.basis === "price-inferred";
+      if (inferred) inferredQuality = true;
+      const session = line
+        ? `${line.cost > 0 ? `${formatUsd(line.cost)} · ` : ""}${formatTokens(line.tokens)} tok`
+        : "";
+      return [
+        `    ${model.id}`,
+        quality && quality.basis !== "default" ? `${quality.tier}${inferred ? "*" : ""}` : "",
+        modelTier(model),
+        formatContextWindow(model.contextWindow),
+        (model.input ?? ["text"]).join("+"),
+        formatPricing(model),
+        session,
+        isCurrent(model) ? "← current" : "",
+      ];
+    };
+    const byQuality = (a: Model<any>, b: Model<any>) =>
+      (qualityOf(b)?.tier ?? 0) - (qualityOf(a)?.tier ?? 0) || a.id.localeCompare(b.id);
+    const withStatus = (kind: RoutingStatus["kind"]) =>
+      group.filter((model) => statuses?.get(modelKey(model))?.kind === kind).sort(byQuality);
+
+    // Group titles sit between table rows, so tag them and align the rest together.
+    const TITLE = "\u0000";
+    const rows: string[][] = [["  MODEL", "QUALITY", "TYPE", "CONTEXT", "INPUT", "PRICE", "SESSION", ""]];
+    if (!statuses) {
+      rows.push(...[...group].sort((a, b) => a.id.localeCompare(b.id)).map(tableRow));
+    } else {
+      const eligible = withStatus("eligible");
+      const frontier = withStatus("frontier");
+      if (eligible.length) rows.push([TITLE + "  Eligible"], ...eligible.map(tableRow));
+      if (frontier.length) rows.push([TITLE + `  ${GROUP_TITLES.frontier}`], ...frontier.map(tableRow));
+    }
+    const aligned = alignColumns(rows.map((row) => (row[0].startsWith(TITLE) ? [""] : row)));
+    const lines = aligned.map((text, i) => (rows[i][0].startsWith(TITLE) ? rows[i][0].slice(1) : text));
+
+    if (statuses) {
+      const label = (model: Model<any>) => `${model.id}${isCurrent(model) ? " (current)" : ""}`;
+      // One line per replacement: the older versions it stands in for, newest first.
+      const replaced = new Map<string, { by: Model<any>; older: Model<any>[] }>();
+      for (const model of group) {
+        const routing = statuses.get(modelKey(model));
+        if (routing?.kind !== "suppressed") continue;
+        const entry = replaced.get(routing.by.id) ?? { by: routing.by, older: [] };
+        entry.older.push(model);
+        replaced.set(routing.by.id, entry);
+      }
+      if (replaced.size) {
+        lines.push(`  ${GROUP_TITLES.suppressed}`);
+        for (const { by, older } of [...replaced.values()].sort((a, b) => a.by.id.localeCompare(b.by.id))) {
+          older.sort((a, b) => compareGeneration(a.id, b.id));
+          lines.push(`    ${older.map(label).join(", ")} → ${by.id}`);
+        }
+      }
+      const excluded = withStatus("excluded");
+      if (excluded.length) lines.push(`  ${GROUP_TITLES.excluded}`, `    ${excluded.map(label).join(", ")}`);
+    }
+
     const auth = status.label ?? status.source ?? "configured";
-    const rows = [...group]
-      .sort((a, b) => a.id.localeCompare(b.id))
-      .map((model) => {
-        const key = `${model.provider}/${model.id}`;
-        const line = costByKey.get(key);
-        if (line) matchedKeys.add(key);
-        const parts = [
-          `tier: ${modelTier(model)}`,
-          formatContextWindow(model.contextWindow),
-          (model.input ?? ["text"]).join("+"),
-          formatPricing(model),
-        ];
-        // The quality axis is omitted when nothing is known, not rendered as noise.
-        const quality = policy?.tiers.get(key);
-        if (quality && quality.basis !== "default") parts.push(`quality: ${quality.tier}/5 (${quality.basis})`);
-        const routing = statuses.get(key);
-        if (routing) parts.push(`routing: ${routingLabel(routing)}`);
-        if (line) parts.push(`session: ${formatUsd(line.cost)} (${formatTokens(line.tokens)} tok)`);
-        const current = ctx.model?.provider === model.provider && ctx.model?.id === model.id;
-        return `  • ${model.id} — ${parts.join(" · ")}${current ? "  ← current" : ""}`;
-      });
-    sections.push(`${ctx.modelRegistry.getProviderDisplayName(provider)} (auth: ${auth}):\n${rows.join("\n")}`);
+    sections.push([`${ctx.modelRegistry.getProviderDisplayName(provider)} (auth: ${auth})`, ...lines]);
   }
 
-  const shownModels = [...byProvider.entries()]
-    .filter(([provider]) => ctx.modelRegistry.getProviderAuthStatus(provider).configured)
-    .flatMap(([, group]) => group);
-  const statusCounts = { enabled: 0, frontier: 0, suppressed: 0, excluded: 0 };
-  for (const model of shownModels) {
-    const status = statuses.get(modelKey(model));
-    if (status) statusCounts[status.kind] += 1;
+  const header = [`Model catalog — ${plural(sections.length, "provider")}, ${plural(shown.length, "model")}`];
+  if (statuses) {
+    const counts = { eligible: 0, frontier: 0, suppressed: 0, excluded: 0 };
+    for (const model of shown) {
+      const routing = statuses.get(modelKey(model));
+      if (routing) counts[routing.kind] += 1;
+    }
+    header.push(`Routing: ${counts.eligible} eligible · ${counts.frontier} frontier only · ${counts.suppressed} suppressed · ${counts.excluded} excluded`);
+    header.push(`Quality runs 1–5 and ranks models for routing${inferredQuality ? "; * means inferred from price, not set in the tier file" : ""}.`);
   }
-  const policySummary = policy
-    ? ` ${statusCounts.enabled} enabled · ${statusCounts.frontier} frontier-only · ${statusCounts.suppressed} suppressed · ${statusCounts.excluded} excluded`
-    : "";
-  const header = `Model catalog — ${authenticated.length} authenticated provider(s), ${shownModels.length} model(s):${policySummary}`;
-  const out: string[] = [header, "", ...sections.flatMap((s) => [s, ""])];
+  header.push("Price is $ per million tokens, input / output.");
 
-  const unmatched = costs.lines.filter((line) => !matchedKeys.has(line.key));
-  const footer: string[] = [
-    `Session cost: ${formatUsd(costs.totalCost)} (${formatTokens(costs.totalTokens)} tokens)`,
-  ];
-  for (const line of unmatched) {
-    footer.push(`  • ${line.key}: ${formatUsd(line.cost)} (${formatTokens(line.tokens)} tok)`);
+  const out: string[] = [...header, "", ...sections.flatMap((section) => [...section, ""])];
+  out.push(`Session cost: ${formatUsd(costs.totalCost)} (${formatTokens(costs.totalTokens)} tokens)`);
+  for (const line of costs.lines.filter((line) => !matchedKeys.has(line.key))) {
+    out.push(`  • ${line.key}: ${formatUsd(line.cost)} (${formatTokens(line.tokens)} tok)`);
   }
   if (unauthenticatedProviders > 0) {
-    footer.push(
-      `Not shown: ${unauthenticatedModels} model(s) from ${unauthenticatedProviders} provider(s) without configured auth.`
-    );
+    out.push(`Not shown: ${unauthenticatedModels} model(s) from ${unauthenticatedProviders} provider(s) without configured auth.`);
   }
-  out.push(...footer);
   return out.join("\n");
 }
