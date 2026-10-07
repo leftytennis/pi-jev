@@ -39,6 +39,16 @@ export function tierKey(provider: string, modelId: string): string {
   return `${provider}/${modelId}`;
 }
 
+/** A model's `provider/id` key, the shape tier tables, exclusions, and backoffs are keyed by. */
+export function modelKey(model: { provider: string; id: string }): string {
+  return tierKey(model.provider, model.id);
+}
+
+/** A model's quality tier, or DEFAULT_TIER when the table has no entry for it. */
+export function tierFor(tiers: TierTable, model: { provider: string; id: string }): QualityTier {
+  return tiers.get(modelKey(model))?.tier ?? DEFAULT_TIER;
+}
+
 export function defaultTierOverlayPath(): string {
   return path.join(os.homedir(), ".pi", "agent", "jev-model-tiers.json");
 }

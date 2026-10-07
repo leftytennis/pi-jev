@@ -2,7 +2,7 @@ import type { ExtensionContext, ExtensionAPI } from "@earendil-works/pi-coding-a
 import type { Model } from "@earendil-works/pi-ai";
 import type { JevClient } from "./jev.js";
 import { bindingWindow, collectPlatformUsage, type UsageReport } from "./usage.js";
-import { DEFAULT_TIER, defaultTierOverlayPath, inferTiers, readTierOverlay, type QualityTier, type TierOverlay, type TierTable } from "./tiers.js";
+import { DEFAULT_TIER, defaultTierOverlayPath, inferTiers, modelKey, readTierOverlay, tierFor, type QualityTier, type TierOverlay, type TierTable } from "./tiers.js";
 import type { QuestionConfig } from "./types.js";
 
 export type ModelProfile = "fast" | "balanced" | "reasoning" | "long-context" | "vision" | "url";
@@ -381,7 +381,6 @@ const FIT_LEVELS = [
   "Best fit: an excellent match for this exact need among typical executors",
 ];
 
-function candidateKey(model: Model<any>): string { return `${model.provider}/${model.id}`; }
 
 /** Version numbers only; context sizes, parameter counts, and dated aliases are not versions. */
 export function generationOf(id: string): number[] {
@@ -432,8 +431,7 @@ export function requestsFrontierModel(prompt: string): boolean {
 export function applyModelTierPolicy<M extends { provider: string; id: string }>(
   models: readonly M[], tiers: TierTable, allowFrontier: boolean, exclude?: Set<string>
 ): M[] {
-  const tierOf = (m: M) => tiers.get(`${m.provider}/${m.id}`)?.tier ?? DEFAULT_TIER;
-  const allowed = models.filter((m) => !exclude?.has(`${m.provider}/${m.id}`) && (allowFrontier || tierOf(m) !== 5));
+  const allowed = models.filter((m) => !exclude?.has(modelKey(m)) && (allowFrontier || tierFor(tiers, m) !== 5));
   return allowed.filter((m) => !allowed.some((other) => supersedes(other, m)));
 }
 
@@ -527,7 +525,7 @@ export class AutoModelRouter {
 
   /** When the model becomes routable again, or undefined while not blocked. */
   public blockedUntil(model: Model<any>): number | undefined {
-    const until = this.blocked.get(candidateKey(model));
+    const until = this.blocked.get(modelKey(model));
     return until !== undefined && until > Date.now() ? until : undefined;
   }
 
@@ -611,7 +609,7 @@ export class AutoModelRouter {
     } else {
       until = now + 60_000;
     }
-    this.blocked.set(candidateKey(model), Math.min(until, now + MAX_BACKOFF_MS));
+    this.blocked.set(modelKey(model), Math.min(until, now + MAX_BACKOFF_MS));
   }
 
   /**
@@ -732,7 +730,7 @@ export class AutoModelRouter {
     const state = {
       task: { text, classified_need: classifiedNeed },
       candidates: models.map((m) => {
-        const assignment = tiers.get(candidateKey(m));
+        const assignment = tiers.get(modelKey(m));
         return {
           provider: m.provider,
           model: m.id,
@@ -769,7 +767,7 @@ export class AutoModelRouter {
       const confidence = typeof answer.confidence === "number" && Number.isFinite(answer.confidence) && answer.confidence >= 0 && answer.confidence <= 1
         ? answer.confidence
         : 0;
-      scores.set(candidateKey(m), { score: value, confidence });
+      scores.set(modelKey(m), { score: value, confidence });
     });
     return scores;
   }
@@ -824,7 +822,7 @@ export class AutoModelRouter {
       }
       const tierTable = this.tiersFor(ctx);
       const excluded = this.overlayFor(ctx).exclude;
-      const tierOf = (m: Model<any>): QualityTier => tierTable.get(candidateKey(m))?.tier ?? DEFAULT_TIER;
+      const tierOf = (m: Model<any>): QualityTier => tierFor(tierTable, m);
       const allowFrontier = requestsFrontierModel(prompt);
       const mustLeaveFrontier = current !== undefined && tierOf(current) === 5 && !allowFrontier;
       const classified = { profile: need.profile, secondaryProfile: need.secondaryProfile };
@@ -836,10 +834,10 @@ export class AutoModelRouter {
       }
       // A backed-off or excluded current model must be left even when the
       // prompt gives no reason to switch.
-      const currentIneligible = current !== undefined && (this.blocked.has(candidateKey(current)) || excluded.has(candidateKey(current)));
+      const currentIneligible = current !== undefined && (this.blocked.has(modelKey(current)) || excluded.has(modelKey(current)));
       const availablePool = (ctx.scopedModels?.length ? ctx.scopedModels.map((x) => x.model) : ctx.modelRegistry.getAvailable())
         .filter((model) => {
-          const until = this.blocked.get(candidateKey(model));
+          const until = this.blocked.get(modelKey(model));
           return until === undefined || until < now;
         });
       const compatible = availablePool.filter((m) => meetsInputRequirements(m, hasImages, hasUrls));
@@ -921,7 +919,7 @@ export class AutoModelRouter {
       // Version numbers from different providers are not comparable.
       const isCurrent = (m: Model<any>) => current?.provider === m.provider && current?.id === m.id;
       const cmpLastResort = (a: Model<any>, b: Model<any>): number =>
-        Number(isCurrent(b)) - Number(isCurrent(a)) || a.provider.localeCompare(b.provider) || compareGeneration(a.id, b.id) || candidateKey(a).localeCompare(candidateKey(b));
+        Number(isCurrent(b)) - Number(isCurrent(a)) || a.provider.localeCompare(b.provider) || compareGeneration(a.id, b.id) || modelKey(a).localeCompare(modelKey(b));
       // Jev can score only a bounded question batch; prefilter oversized pools deterministically.
       const heuristicRank = (a: Model<any>, b: Model<any>) =>
         heuristicNeedScore(b, need, hasImages, tierOf(b), hasUrls) - heuristicNeedScore(a, need, hasImages, tierOf(a), hasUrls) || demoteRank(a) - demoteRank(b) || cmpHeadroom(a, b) || cmpLastResort(a, b);
@@ -937,8 +935,8 @@ export class AutoModelRouter {
           const scores = await this.jevFitScores(prompt, need, eligible, jevSignal, tierTable);
           fitScores = scores;
           const ranked = [...eligible].sort((a, b) => {
-            const sa = scores.get(candidateKey(a))!;
-            const sb = scores.get(candidateKey(b))!;
+            const sa = scores.get(modelKey(a))!;
+            const sb = scores.get(modelKey(b))!;
             return sb.score - sa.score || demoteRank(a) - demoteRank(b) || sb.confidence - sa.confidence || cmpHeadroom(a, b) || cmpLastResort(a, b);
           });
           target = ranked[0];
@@ -956,14 +954,14 @@ export class AutoModelRouter {
       }
       if (runnerUp && quota) {
         const tiedScore = fitScores
-          ? fitScores.get(candidateKey(target))!.score === fitScores.get(candidateKey(runnerUp))!.score &&
-            fitScores.get(candidateKey(target))!.confidence === fitScores.get(candidateKey(runnerUp))!.confidence
+          ? fitScores.get(modelKey(target))!.score === fitScores.get(modelKey(runnerUp))!.score &&
+            fitScores.get(modelKey(target))!.confidence === fitScores.get(modelKey(runnerUp))!.confidence
           : heuristicNeedScore(target, need, hasImages, tierOf(target), hasUrls) === heuristicNeedScore(runnerUp, need, hasImages, tierOf(runnerUp), hasUrls);
         if (tiedScore && demoteRank(target) === demoteRank(runnerUp) && headroomOf(target) !== headroomOf(runnerUp)) {
           quotaNotes.push(`headroom tiebreak: ${target.provider} at ${Math.round(headroomOf(target))}% over ${runnerUp.provider} at ${Math.round(headroomOf(runnerUp))}%`);
         }
       }
-      const winnerTier = tierTable.get(candidateKey(target));
+      const winnerTier = tierTable.get(modelKey(target));
       const tierNote = winnerTier && winnerTier.basis !== "default" ? `; quality ${winnerTier.tier}/5 ${winnerTier.basis}` : "";
       const reason = `${need.reason} (${scorer} scoring${tierNote}); ${policyNote}${quotaNotes.length > 0 ? `; quota: ${quotaNotes.join("; ")}` : ""}`;
       if (current?.provider === target.provider && current?.id === target.id) return { changed: false, ...classified, model: target, reason };
