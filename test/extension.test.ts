@@ -129,6 +129,27 @@ test("a failed turn backs off the model named on the message, not the current on
   assert.deepEqual(selected, ["glm-5.3-flash"], "highspeed is backed off");
 });
 
+test("with auto-model off a failed turn is recorded but neither switches nor claims a fallback", async (t) => {
+  const highspeed = zaiModel("glm-5.3-highspeed");
+  const flash = zaiModel("glm-5.3-flash", { cost: { input: 0.075, output: 0.25 } });
+  const selected: string[] = [];
+  const ext = loadExtension(t, { "jev-auto-model": false }, { setModel: async (m: any) => { selected.push(m.id); return true; } });
+  const statuses: string[] = [];
+  const ctx: any = {
+    model: highspeed,
+    modelRegistry: { getAvailable: () => [highspeed, flash], getProviderAuthStatus: () => ({ configured: false }) },
+    getSystemPrompt: () => "",
+    ui: { setStatus: (_key: string, text: string) => statuses.push(text), notify: () => {} },
+  };
+  const failed = {
+    role: "assistant", provider: "zai", model: "glm-5.3-highspeed", content: [], stopReason: "error",
+    errorMessage: '429: {"code":"1311","message":"Your current subscription plan does not yet include access to GLM-5.3-Highspeed"}',
+  };
+  await ext.hooks.get("agent_end")!({ type: "agent_end", messages: [failed] }, ctx);
+  assert.deepEqual(selected, []);
+  assert.deepEqual(statuses.filter((s) => /fallback|access/.test(s)), []);
+});
+
 test("successful and aborted runs leave routing alone", async (t) => {
   const highspeed = zaiModel("glm-5.3-highspeed");
   const flash = zaiModel("glm-5.3-flash", { cost: { input: 0.075, output: 0.25 } });

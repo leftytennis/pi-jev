@@ -128,7 +128,9 @@ export default function (pi: ExtensionAPI) {
     const failed = ctx.modelRegistry.getAvailable().find((m) => m.provider === last.provider && m.id === last.model)
       ?? (ctx.model?.provider === last.provider && ctx.model.id === last.model ? ctx.model : undefined);
     const kind = autoModel.recordProviderError(last.errorMessage, failed);
-    if (!kind) return;
+    // The backoff is kept so turning auto-model on later still avoids the
+    // model; with it off there is no fallback to announce.
+    if (!kind || !autoModel.enabled) return;
     const routed = await autoModel.failover(ctx);
     ctx.ui.setStatus("jev", `jev: ${kind} → ${routed?.changed ? routed.model?.id : backoffDetail(failed)}`);
   });
