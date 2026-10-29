@@ -1,4 +1,4 @@
-import { convertToLlm, serializeConversation, type ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { JevClient } from "./jev.js";
 import { MAX_STATE_CHARS } from "./limits.js";
 import { capText } from "./redact.js";
@@ -57,6 +57,8 @@ export class JevCompactor {
 
     let entries: Entry[];
     try {
+      // Loaded on use: pi's runtime needs Node >= 22.19, while this module is also imported by tooling on older Node.
+      const { convertToLlm, serializeConversation } = await import("@earendil-works/pi-coding-agent");
       entries = messages
         .map((message: any, index: number) => ({
           index,
