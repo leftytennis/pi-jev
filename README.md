@@ -4,7 +4,7 @@ Semantic tool routing and typed decisions for the [Pi coding agent](https://pi.d
 
 ## Features
 
-- **Semantic Tool Router (`jev_find_tools`)**: Automatically searches registered inactive tools and additively activates only the tools needed for the user's specific prompt or workflow.
+- **Semantic Tool Router (`jev_find_tools`)**: Automatically searches registered inactive tools and additively activates only the tools needed for the user's specific prompt or workflow. Read-only tools activate directly; tools that can write, execute, or reach the network need your confirmation.
 - **Skill Discovery (`jev_find_skill`)**: Semantically matches and suggests the most relevant specialized agent skills (`SKILL.md`) for any task without cluttering prompt context. Scope-aware matching avoids false positives from coincidental topic overlap.
 - **Typed Judgments (`jev_evaluate`)**: Run fast, calibrated System One decisions directly from the agent using Choice, Noul (yes/no probability), and Score primitives.
 - **Custom Jev Endpoint**: `PI_JEV_BASE_URL` / `TYPESAFE_BASE_URL` points the TypeSafe client at Jev-compatible local servers or proxies such as Laya `laya-serve`.
@@ -48,13 +48,14 @@ export PI_JEV_BASE_URL=http://localhost:8000
 # TYPESAFE_BASE_URL also works, but PI_JEV_BASE_URL wins.
 ```
 
-Custom endpoints may omit `TYPESAFE_API_KEY`; `pi-jev` sends an empty key in that case for unauthenticated local servers such as Laya's `laya-serve`.
+Custom endpoints may omit `TYPESAFE_API_KEY`; `pi-jev` sends an empty key in that case for unauthenticated local servers such as Laya's `laya-serve`. A custom endpoint must use `https://`, or `http://` on `localhost`/`127.0.0.1`/`[::1]`; any configured key is sent to it, so other plain-HTTP hosts are refused.
 
 Or store your TypeSafe key in Pi's secret store file:
 
 ```bash
-mkdir -p ~/.pi/agent/secrets
-echo "ts_..." > ~/.pi/agent/secrets/typesafe_api_key
+install -d -m 700 ~/.pi/agent/secrets
+# Paste the key at the prompt; it stays out of shell history and the file is owner-only.
+(umask 077; read -rs KEY && printf %s "$KEY" > ~/.pi/agent/secrets/typesafe_api_key)
 ```
 
 When both session and environment keys exist, an explicit non-empty runtime key set in-session takes precedence and reports origin as `set in-session`, while empty session values safely fall back to the environment key.
@@ -64,6 +65,26 @@ Then check status inside Pi:
 ```text
 /jev status
 ```
+
+### Data sent to the TypeSafe API
+
+All Jev features send evaluation state to the TypeSafe API you configure with
+the key above. Per feature, when enabled:
+
+| Feature | Payload |
+|---|---|
+| `jev auto` / `jev_find_tools` / `jev_find_skill` | your prompt (≤ 4,000 chars) + tool/skill names and descriptions |
+| `jev auto-model` | your prompt (≤ 4,000 chars) + per-model capability metadata (reasoning, context window, input modalities, input cost, serving-tier grade) |
+| `jev tool-guard` | every tool call's name and serialized arguments (≤ 4 KB; calls touching `.env`, key, or secret paths are skipped entirely) and failed tools' error output (≤ 4 KB) |
+| `jev compact` | the messages being compacted: your messages whole (≤ 50,000 chars in total), plus at most 24 other entries, 2,000 chars each |
+| `jev-gate` CLI | `git diff` output plus untracked files, a file, or piped state (≤ 50,000 chars unless `--max-chars` raises it) |
+
+Recognized secret material (PEM blocks, `AKIA…`/`ghp_…`/`sk-…`-style tokens,
+JWTs, `Authorization:` headers, `KEY=VALUE` credentials) is replaced with
+`<REDACTED>` before anything leaves the machine (`src/redact.ts`). Redaction is
+best-effort pattern matching — treat every enabled feature as sending session
+derived content to a third party, and keep the flags off when working with
+material that must not leave your machine.
 
 ## Automatic Mode
 
@@ -76,7 +97,7 @@ export PI_JEV_AUTO=1     # persistent via environment
 
 Toggle at runtime with `/jev auto on` or `/jev auto off` (no argument flips it). Automatic mode:
 
-- activates inactive tools whose usefulness probability clears `JEV_THRESHOLD` (0.65);
+- activates inactive tools whose usefulness probability clears `JEV_THRESHOLD` (0.65), asking first for any tool that is not read-only;
 - injects matching skill recommendations into the turn;
 - skips slash commands, empty prompts, and prompts while Jev is unconfigured or already evaluating;
 - never throws — a Jev failure leaves the turn untouched.
@@ -89,7 +110,7 @@ Use `pi-jev-gate` as a post-run gate check for subagents or CI/CD pipelines. Eva
 
 - Exits `0` if evaluation probability meets threshold ($\ge 0.70$ by default).
 - Exits `1` if rejected.
-- Exits `2` on error (or `0` with `--fail-open`).
+- Exits `2` on error (or `0` with `--fail-open`), including when the runner is killed or fails to start, on unknown options, and on empty or oversized state. State over 50,000 characters is never truncated and judged; raise the limit with `--max-chars`. `--diff` covers tracked changes and untracked files (symlinks are listed without being followed; an untracked secret-named file such as `.env` exits `2` without being sent); pass `--allow-empty` to judge an empty diff or stdin instead of exiting `2`. `--fail-open` only covers an unreachable or unconfigured judge: missing criteria and state errors still exit `2`.
 
 #### Subagent `gate` Example
 Set a child subagent's `gate` parameter to run `pi-jev-gate` immediately upon completion:
@@ -152,7 +173,7 @@ Execution is asynchronous; completion is reported back into the session. Automat
 
 ### Jev Compaction
 
-`/jev compact on` enables Jev-guided compaction. Tool-history entries are evaluated for retention; important paths, errors, constraints, and results stay in the custom summary. User and assistant intent is not rewritten. The feature preserves Pi's `firstKeptEntryId` boundary and falls back to Pi's built-in summary when Jev is unconfigured, fails, or returns unusable data. It does not silently truncate context.
+`/jev compact on` enables Jev-guided compaction. It works on exactly the messages Pi is about to compact: every message you typed is kept verbatim, and Jev decides which assistant, tool, and `!command` entries to retain, so important paths, errors, and results stay in the custom summary. The previous compaction summary is carried forward. The feature preserves Pi's `firstKeptEntryId` boundary and falls back to Pi's built-in summary when Jev is unconfigured, fails, leaves any entry unjudged, or the window holds more than 24 other entries or over 50,000 characters of your messages. `<summary>` tags in retained text are neutralized so it cannot escape Pi's wrapper.
 
 ### Automatic Model Mode
 
@@ -189,6 +210,8 @@ Auto-model uses task signals, attached images, and context size to classify the 
 
 ### 1. `jev_find_tools`
 Used by the model to find capabilities that aren't currently loaded into the prompt prefix.
+
+Read-only tools (`read`, `grep`, `find`, `ls`, and tools annotated `readOnlyHint`) activate directly. Anything else — `bash`, `edit`, `write`, MCP tools without a read-only hint or that also declare `destructiveHint` or `openWorldHint` — needs your confirmation, and stays off in sessions without a UI. A tool you decline is not offered again in that session. A model-supplied `threshold` can raise the cutoff but never lower it below `JEV_THRESHOLD`. `/jev auto` follows the same rules. Tools removed with `--tools` or `--exclude-tools` are never reachable.
 
 ```json
 {

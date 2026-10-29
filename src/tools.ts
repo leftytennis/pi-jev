@@ -5,6 +5,7 @@ import type { ToolRouter } from "./router.js";
 import type { SkillRouter } from "./skills.js";
 import type { QuestionConfig } from "./types.js";
 import { JEV_THRESHOLD } from "./skills.js";
+import { MAX_QUESTIONS, capState } from "./limits.js";
 
 export function registerJevTools(
   pi: ExtensionAPI,
@@ -28,11 +29,11 @@ export function registerJevTools(
       }),
       threshold: Type.Optional(
         Type.Number({
-          description: "Activation confidence threshold between 0.0 and 1.0 (default JEV_THRESHOLD).",
+          description: "Activation confidence threshold between the default (JEV_THRESHOLD) and 1.0; lower values are raised to the default.",
         })
       ),
     }),
-    async execute(_toolCallId, params: any, signal, onUpdate) {
+    async execute(_toolCallId, params: any, signal, onUpdate, ctx) {
       onUpdate?.({
         content: [{ type: "text", text: `Evaluating candidate tools for: "${params.query}"...` }],
         details: {},
@@ -41,17 +42,21 @@ export function registerJevTools(
       const result = await router.findAndActivate(
         params.query,
         params.threshold ?? JEV_THRESHOLD,
-        signal
+        signal,
+        ctx
       );
 
-      let summaryText = "";
-      if (result.activated.length > 0) {
-        summaryText = `Activated tools: ${result.activated.join(", ")}`;
-      } else if (result.candidates.length > 0) {
-        summaryText = `No tools met the activation threshold among candidates: ${result.candidates.join(", ")}`;
-      } else {
-        summaryText = `No matching inactive tools found.`;
+      const lines: string[] = [];
+      if (result.activated.length > 0) lines.push(`Activated tools: ${result.activated.join(", ")}`);
+      if (result.declined.length > 0) {
+        lines.push(`Not activated (needs user approval, which was declined or unavailable): ${result.declined.join(", ")}. Do not retry; ask the user to enable them if needed.`);
       }
+      if (lines.length === 0) {
+        lines.push(result.candidates.length > 0
+          ? `No tools met the activation threshold among candidates: ${result.candidates.join(", ")}`
+          : "No matching inactive tools found.");
+      }
+      let summaryText = lines.join("\n");
 
       if (result.fallbackUsed) {
         summaryText += " (Note: local heuristic shortlist used due to Jev unconfigured/offline)";
@@ -152,6 +157,11 @@ export function registerJevTools(
           "TypeSafe Jev is not configured. Set TYPESAFE_API_KEY, save ~/.pi/agent/secrets/typesafe_api_key, or set PI_JEV_BASE_URL."
         );
       }
+      // Bound cost exposure: one call must not be able to fire an unbounded
+      // number of paid judgments.
+      if (Object.keys(params.questions as Record<string, unknown>).length > MAX_QUESTIONS) {
+        throw new Error(`Too many questions in one jev_evaluate call (max ${MAX_QUESTIONS}). Split the evaluation.`);
+      }
 
       onUpdate?.({
         content: [{ type: "text", text: "Querying TypeSafe Jev model..." }],
@@ -169,7 +179,7 @@ export function registerJevTools(
 
       const response = await jevClient.evaluate(
         {
-          state: params.state,
+          state: capState(params.state ?? ""),
           questions,
           model: params.model,
         },

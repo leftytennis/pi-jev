@@ -1,9 +1,22 @@
-import { parseGateArgs, evaluateGate } from "../src/gate.js";
+import { parseGateArgs, evaluateGate, printHelp, GateStateError, type GateOptions } from "../src/gate.js";
 import { JevClient } from "../src/jev.js";
 
 async function main() {
   const args = process.argv.slice(2);
-  const options = parseGateArgs(args);
+  let options: GateOptions;
+  try {
+    options = parseGateArgs(args);
+  } catch (err: any) {
+    // Bad arguments never pass, even with --fail-open: the gate cannot know what was asked.
+    console.error(`[jev-gate] ERROR: ${err?.message || err}`);
+    process.exit(2);
+  }
+
+  if (options.help) {
+    printHelp();
+    // Only a bare --help is a successful run; mixed into a gate invocation it must not look like a pass.
+    process.exit(args.length === 1 ? 0 : 2);
+  }
 
   try {
     const client = new JevClient();
@@ -25,7 +38,7 @@ async function main() {
 
     process.exit(result.passed ? 0 : 1);
   } catch (err: any) {
-    if (options.failOpen) {
+    if (options.failOpen && !(err instanceof GateStateError)) {
       console.warn(`[jev-gate] WARN (fail-open): ${err?.message || err}`);
       process.exit(0);
     }

@@ -1148,6 +1148,8 @@ test("real JevClient normalization keeps missing score answers invalid", async (
       return { answers: { fit_0: {}, fit_1: {} }, model: "jev-latest" };
     },
   };
+  // The client rebuilds when the active key changes; mark the stub as built for it.
+  (jev as any).clientKey = "test-key";
   const scored = await jev.evaluate({ state: {}, questions: { fit_0: { type: "score", instructions: "fit", criteria: ["worst", "best"] }, fit_1: { type: "score", instructions: "fit", criteria: ["worst", "best"] } } });
   assert.equal(scored.answers.fit_0.value, undefined, "a missing score must not be normalized into 0");
   const router = new AutoModelRouter(pi, true, jev);
