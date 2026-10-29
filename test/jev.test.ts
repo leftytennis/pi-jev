@@ -243,3 +243,13 @@ test("evaluate forwards per-call retry options to the SDK", async () => {
   await assert.rejects(new JevClient().evaluate(request, undefined, { retry: { maxRetries: 0 } }), /unavailable/);
   assert.equal(attempts, 1);
 });
+
+
+test("malformed noul answers stay absent instead of becoming negative judgments", async () => {
+  process.env.TYPESAFE_API_KEY = "test-key";
+  for (const answer of [null, {}, { noul: null }, { noul: "0.9" }, { noul: -1 }, { noul: 2 }]) {
+    globalThis.fetch = async () => Response.json({ answers: { pick: answer }, model: "test" });
+    const result = await new JevClient().evaluate(request);
+    assert.equal(result.answers.pick, undefined, JSON.stringify(answer));
+  }
+});

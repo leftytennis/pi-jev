@@ -192,7 +192,7 @@ export class JevClient {
       const answers: Record<string, JevAnswerResult> = {};
       for (const [id, rawAns] of Object.entries(response.answers || {})) {
         const qConfig = request.questions[id];
-        if (!qConfig) continue;
+        if (!qConfig || !rawAns || typeof rawAns !== "object") continue;
 
         if (qConfig.type === "choice") {
           const c = (rawAns as any).choice ?? (rawAns as any).value;
@@ -204,7 +204,9 @@ export class JevClient {
             raw: rawAns,
           };
         } else if (qConfig.type === "noul") {
-          const prob = (rawAns as any).noul ?? (rawAns as any).probability ?? (rawAns as any).value ?? 0;
+          const prob = (rawAns as any).noul ?? (rawAns as any).probability ?? (rawAns as any).value;
+          // Malformed judgments are absent, not a fabricated negative answer.
+          if (typeof prob !== "number" || !Number.isFinite(prob) || prob < 0 || prob > 1) continue;
           answers[id] = {
             type: "noul",
             value: prob,

@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- Closing audit: malformed Jev probabilities remain absent, the gate rejects malformed judgments even at threshold zero, and failed tool calls touching secret paths skip external error evaluation.
+
 ### Security
 - `jev_find_tools` and `/jev auto` no longer re-enable write or exec tools on their own. Only read-only tools (`read`, `grep`, `find`, `ls`, or tools annotated `readOnlyHint`) activate directly; others need user confirmation and stay off without a UI. A model-supplied `threshold` is clamped to at least `JEV_THRESHOLD`. Previously `threshold: 0` restored `bash`, `edit`, and `write` in sessions started with `--no-builtin-tools` or a read-only `defaultTools`. A `readOnlyHint` paired with `destructiveHint` or `openWorldHint` is not trusted, and a declined tool is not offered again that session. Tool routing sends the task once in state, capped at 4,000 chars, instead of repeating the full prompt in every question.
 - `jev-gate` fails closed: a runner killed by a signal or failing to spawn exits `2`, not `0`. `--diff` includes untracked files (symlinks not followed; an untracked secret-named file such as `.env` exits `2` without being sent), handles diffs over 1 MB, and before the first commit judges files as they are on disk. State over 50,000 characters exits `2` instead of being truncated and judged; `--max-chars` raises the limit. Empty state (including an empty `-f` file), a failed diff, file, or stdin read, unknown options, empty or out-of-range thresholds, and `--help` mixed into a gate run all exit `2`; `--allow-empty` opts into judging empty state. `--fail-open` no longer turns missing criteria or state errors into a pass.

@@ -119,3 +119,14 @@ test("ToolGuard's 3 s deadline bounds the real SDK client when the endpoint hang
   assert.equal(requests, 1, "no retries");
   assert.ok(elapsed >= 2_500 && elapsed < 6_000, `bounded by the 3 s deadline, took ${elapsed.toFixed(0)} ms`);
 });
+
+
+test("failed secret-path calls skip external error evaluation", async () => {
+  const client = new JevClient();
+  client.isConfigured = () => true;
+  let calls = 0;
+  client.evaluate = async () => { calls++; return { answers: {}, model: "test", elapsedMs: 0 }; };
+  const guard = new ToolGuard({ on: () => {} } as any, client, true);
+  assert.equal(await guard.enhanceErrorResult("write", { path: ".env", content: "private" }, []), null);
+  assert.equal(calls, 0);
+});
