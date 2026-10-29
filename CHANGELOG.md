@@ -7,9 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-- Closing audit: malformed Jev probabilities remain absent, the gate rejects malformed judgments even at threshold zero, and failed tool calls touching secret paths skip external error evaluation.
+## [0.8.1] - 2026-10-28
 
 ### Security
+- Closing audit: malformed Jev probabilities remain absent, the gate rejects malformed judgments even at threshold zero, and failed tool calls touching secret paths skip external error evaluation.
 - `jev_find_tools` and `/jev auto` no longer re-enable write or exec tools on their own. Only read-only tools (`read`, `grep`, `find`, `ls`, or tools annotated `readOnlyHint`) activate directly; others need user confirmation and stay off without a UI. A model-supplied `threshold` is clamped to at least `JEV_THRESHOLD`. Previously `threshold: 0` restored `bash`, `edit`, and `write` in sessions started with `--no-builtin-tools` or a read-only `defaultTools`. A `readOnlyHint` paired with `destructiveHint` or `openWorldHint` is not trusted, and a declined tool is not offered again that session. Tool routing sends the task once in state, capped at 4,000 chars, instead of repeating the full prompt in every question.
 - `jev-gate` fails closed: a runner killed by a signal or failing to spawn exits `2`, not `0`. `--diff` includes untracked files (symlinks not followed; an untracked secret-named file such as `.env` exits `2` without being sent), handles diffs over 1 MB, and before the first commit judges files as they are on disk. State over 50,000 characters exits `2` instead of being truncated and judged; `--max-chars` raises the limit. Empty state (including an empty `-f` file), a failed diff, file, or stdin read, unknown options, empty or out-of-range thresholds, and `--help` mixed into a gate run all exit `2`; `--allow-empty` opts into judging empty state. `--fail-open` no longer turns missing criteria or state errors into a pass.
 - Jev compaction works on `preparation.messagesToSummarize` instead of the first 24 entries of the whole branch, keeps every typed user message whole, judges `!command` output like tool output, carries the previous summary forward, defers to Pi's summarizer when there are too many entries or any entry goes unjudged, keeps entry text out of question instructions, and neutralizes `<summary>` tags in retained text.
@@ -27,7 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `/jev status` warns when the TypeSafe secrets file has group or other permissions (`mode & 0o077`), without refusing the key. (Kimi F-13 / Fable F9.)
 
 ### Fixed
-- Frontier-request matching excludes both smart quotes from quoted spans and scans at most `MAX_TASK_CHARS` (4,000), avoiding quadratic work on unmatched opening quotes. Added a 200 KB timing regression. (Kimi F-10 / Fable F12.)
+- Frontier-request matching removes quoted spans before applying `MAX_TASK_CHARS` (4,000) and discards clauses cut by the limit, avoiding truncated consent. Smart-quote matching avoids quadratic work on unmatched opening quotes. Added a 200 KB timing regression. (Kimi F-10 / Fable F12.)
 - Skill recommendations in `jev_find_skill`, auto mode, and `/jev skills` render a single `/skill:` prefix while preserving full command names internally.
 - Tier aliases require an own property, rejecting inherited names such as `constructor` and `__proto__`. (Kimi F-16.)
 - Compaction labels retained command output and custom messages separately from typed user turns instead of keeping Pi's serialized `[User]:` prefix.
