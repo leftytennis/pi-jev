@@ -2,6 +2,8 @@
 
 Semantic tool routing and typed decisions for the [Pi coding agent](https://pi.dev) powered by [TypeSafe](https://typesafe.ai) Jev (System One).
 
+This fork uses the npm package name `@leftytennis/pi-jev`. The upstream project is [TheoOliveira/pi-jev](https://github.com/TheoOliveira/pi-jev); its unscoped npm package is separate.
+
 ## Features
 
 - **Semantic Tool Router (`jev_find_tools`)**: Automatically searches registered inactive tools and additively activates only the tools needed for the user's specific prompt or workflow. Read-only tools activate directly; tools that can write, execute, or reach the network need your confirmation.
@@ -17,20 +19,20 @@ Semantic tool routing and typed decisions for the [Pi coding agent](https://pi.d
 - **Tool Call Guard (opt-in)**: `--jev-tool-guard` / `PI_JEV_TOOL_GUARD=1` / `/jev tool-guard on` intercepts tool calls with Jev to detect hallucinations and enhance failed results. This is an anti-hallucination aid, not a security control: it fails open on errors or a 3-second timeout, with no retries. Off by default.
 - **Jev Compaction (opt-in)**: `--jev-compact` / `PI_JEV_COMPACT=1` / `/jev compact on` uses Jev to retain important tool history during `/compact`, while Pi's normal compaction remains the safe fallback.
 - **Agent Orchestration & Typed Agent**: `/jev agents <task>` dispatches `pi-subagents` orchestration; register `agent: "jev"` in workflows for instant sub-second typed judgments without LLM overhead.
-- **Post-Run Gate Check (`jev-gate` CLI)**: Fast binary for subagent `gate` parameters (`npx pi-jev-gate -c "criteria"`). Checks git diff / output and exits 0 on pass or 1 on fail.
+- **Post-Run Gate Check (`jev-gate` CLI)**: Fast binary for subagent `gate` parameters (`npx --package=@leftytennis/pi-jev pi-jev-gate -c "criteria"`). Checks git diff / output and exits 0 on pass or 1 on fail.
 - **On-Demand & Safe**: Runs when called. No unsolicited per-turn API token costs. Fails closed safely: if Jev is unreachable or unconfigured, tool routing does not blindly activate unjudged tools and reports zero confidence on keyword fallbacks.
 - **Cost Clarity**: Tool routing (`jev_find_tools`, `/jev auto`), skill discovery (`jev_find_skill`), evaluations (`jev_evaluate`), Jev subagents (`agent: "jev"`), and gate checks (`pi-jev-gate`) consume a Jev System One request. `/jev auto-model` spends up to two Jev evaluations per routed prompt when a key is configured — one to classify the need and one to score candidates; SDK retries may add HTTP attempts within the routing timeout — and it falls back to the local heuristic on any Jev failure or without a key (attempts already made may still have been consumed). `/jev thinking` and topology fallback classify locally without spending Jev requests.
 
 ## Installation
 
 ```bash
-pi install npm:pi-jev
+pi install npm:@leftytennis/pi-jev
 ```
 
 Or install directly from GitHub:
 
 ```bash
-pi install git:github.com/TheoOliveira/pi-jev
+pi install git:github.com/leftytennis/pi-jev
 ```
 
 ## Setup
@@ -125,20 +127,20 @@ Set a child subagent's `gate` parameter to run `pi-jev-gate` immediately upon co
 {
   "agent": "worker",
   "task": "Refactor auth middleware to use jose",
-  "gate": "npx pi-jev-gate -c 'Middleware strictly refactored without breaking exports and no new any types' -d -p 0.8"
+  "gate": "npx --package=@leftytennis/pi-jev pi-jev-gate -c 'Middleware strictly refactored without breaking exports and no new any types' -d -p 0.8"
 }
 ```
 
 #### Pipeline / CLI Examples
 ```bash
 # Check git diff against acceptance criteria
-npx pi-jev-gate -c "All exported functions have TypeScript type annotations" --diff
+npx --package=@leftytennis/pi-jev pi-jev-gate -c "All exported functions have TypeScript type annotations" --diff
 
 # Check piped test/linter output
-npm test 2>&1 | npx pi-jev-gate -c "Zero test failures and no unhandled promise rejections"
+npm test 2>&1 | npx --package=@leftytennis/pi-jev pi-jev-gate -c "Zero test failures and no unhandled promise rejections"
 
 # JSON output with custom threshold
-npx pi-jev-gate -c "Documentation updated" -f ./README.md -p 0.85 --json
+npx --package=@leftytennis/pi-jev pi-jev-gate -c "Documentation updated" -f ./README.md -p 0.85 --json
 ```
 
 ### Typed Jev Subagent (`agent: "jev"`)

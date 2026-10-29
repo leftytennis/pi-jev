@@ -1,5 +1,5 @@
 {
-  "name": "pi-jev",
+  "name": "@leftytennis/pi-jev",
   "version": "0.8.1",
   "description": "Semantic tool routing and typed System One decisions for the Pi coding agent using TypeSafe Jev",
   "type": "module",
@@ -59,12 +59,16 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/TheoOliveira/pi-jev.git"
+    "url": "git+https://github.com/leftytennis/pi-jev.git"
   },
   "bugs": {
-    "url": "https://github.com/TheoOliveira/pi-jev/issues"
+    "url": "https://github.com/leftytennis/pi-jev/issues"
   },
-  "homepage": "https://github.com/TheoOliveira/pi-jev#readme",
+  "homepage": "https://github.com/leftytennis/pi-jev#readme",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "author": "Theophilo Damiao",
   "license": "MIT"
 }

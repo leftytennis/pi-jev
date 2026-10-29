@@ -36,12 +36,11 @@ jobs:
         with:
           node-version: 22.x
           registry-url: 'https://registry.npmjs.org'
+      # OIDC trusted publishing requires npm >=11.5.1 and Node >=22.14.
+      - run: npm install --global npm@11.5.1 --ignore-scripts
       # The published files are plain sources; nothing needs install scripts here.
       - run: npm ci --ignore-scripts
       - run: npm pack --dry-run
-      # NPM_TOKEN is the fallback until npm trusted publishing is configured for
-      # this repository on npmjs.com; once it is, delete the secret and the env
-      # line below, and npm publish will authenticate with the OIDC token alone.
+      # Configure the package's trusted publisher for leftytennis/pi-jev,
+      # publish.yml, environment npm-publish. No stored publish token is used.
       - run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
