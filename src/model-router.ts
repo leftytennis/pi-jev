@@ -4,6 +4,7 @@ import type { JevClient } from "./jev.js";
 import { bindingWindow, collectPlatformUsage, type UsageReport } from "./usage.js";
 import { DEFAULT_TIER, defaultTierOverlayPath, inferTiers, modelKey, readTierOverlay, tierFor, type QualityTier, type TierOverlay, type TierTable } from "./tiers.js";
 import type { QuestionConfig } from "./types.js";
+import { MAX_TASK_CHARS } from "./limits.js";
 
 export type ModelProfile = "fast" | "balanced" | "reasoning" | "long-context" | "vision" | "url";
 export type ModelErrorKind = "access" | "quota" | "rate-limit" | "context-limit" | "unavailable" | "timeout" | "auth" | "unknown";
@@ -234,7 +235,6 @@ function describePressure(pressure: QuotaPressure): string {
   return pressure.limitReached ? `${base}, limit reached` : base;
 }
 const MAX_JEV_CANDIDATES = 24;
-const MAX_TASK_CHARS = 4_000;
 
 /** Hard cap on any backoff, so a bogus reset header cannot park a model for good. */
 const MAX_BACKOFF_MS = 7 * 24 * 60 * 60 * 1000;

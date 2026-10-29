@@ -100,7 +100,7 @@ test("ToolRouter accepts a probability exactly at the shared threshold and rejec
       }),
     } as unknown as JevClient;
     const pi: any = {
-      getAllTools: () => [{ name: "sqlite_query", description: "Query sqlite" }],
+      getAllTools: () => [{ name: "sqlite_query", description: "Query sqlite", annotations: { readOnlyHint: true } }],
       getActiveTools: () => [],
       setActiveTools: () => {},
     };
@@ -118,4 +118,98 @@ test("ToolRouter accepts a probability exactly at the shared threshold and rejec
 test("JevClient handles unconfigured state safely without throwing in check", () => {
   const client = new JevClient();
   assert.equal(typeof client.isConfigured(), "boolean");
+});
+
+function routerWith(tools: any[], score: number, active: string[] = []) {
+  let current = [...active];
+  const jevClient = {
+    isConfigured: () => true,
+    evaluate: async (request: any) => ({
+      answers: Object.fromEntries(Object.keys(request.questions).map((name) => [name, { type: "noul", value: score }])),
+      model: "m",
+      elapsedMs: 1,
+    }),
+  } as unknown as JevClient;
+  const pi: any = {
+    getAllTools: () => tools,
+    getActiveTools: () => current,
+    setActiveTools: (names: string[]) => { current = names; },
+  };
+  return { router: new ToolRouter(pi, jevClient), active: () => current };
+}
+
+const BUILTINS = ["read", "bash", "edit", "write", "grep", "find", "ls", "powershell"].map((name) => ({ name, description: name }));
+
+test("a model-supplied threshold below the default cannot activate low-scoring tools", async () => {
+  const { router, active } = routerWith(BUILTINS, 0.01, ["read", "grep", "find", "ls"]);
+  const result = await router.findAndActivate("run shell bash write edit file", 0);
+  assert.deepEqual(result.activated, []);
+  assert.deepEqual(active(), ["read", "grep", "find", "ls"]);
+});
+
+test("write/exec tools need user confirmation and stay off without a UI", async () => {
+  const { router, active } = routerWith(BUILTINS, 0.99, ["read"]);
+  const headless = await router.findAndActivate("run shell bash write edit file", JEV_THRESHOLD, undefined, { hasUI: false } as any);
+  assert.deepEqual(headless.activated.sort(), ["find", "grep", "ls"], "only read-only built-ins come back");
+  assert.deepEqual(headless.declined.sort(), ["bash", "edit", "powershell", "write"]);
+  assert.ok(!active().includes("bash"));
+
+  const prompts: string[] = [];
+  const refused = await router.findAndActivate("run bash", JEV_THRESHOLD, undefined, {
+    hasUI: true,
+    ui: { confirm: async (_title: string, message: string) => { prompts.push(message); return false; } },
+  } as any);
+  assert.equal(prompts.length, 1);
+  assert.match(prompts[0], /bash/);
+  assert.deepEqual(refused.activated, []);
+  assert.ok(!active().includes("bash"));
+
+  const again = await router.findAndActivate("run bash", JEV_THRESHOLD, undefined, {
+    hasUI: true,
+    ui: { confirm: async () => { prompts.push("asked again"); return true; } },
+  } as any);
+  assert.equal(prompts.length, 1, "a refused tool is not asked about again this session");
+  assert.ok(again.declined.includes("bash"));
+
+  const fresh = routerWith(BUILTINS, 0.99, ["read"]);
+  const approved = await fresh.router.findAndActivate("run bash", JEV_THRESHOLD, undefined, {
+    hasUI: true,
+    ui: { confirm: async () => true },
+  } as any);
+  assert.ok(approved.activated.includes("bash"));
+  assert.ok(fresh.active().includes("bash"));
+});
+
+test("a readOnlyHint paired with destructiveHint or openWorldHint still needs confirmation", async () => {
+  const { router } = routerWith([
+    { name: "purge_cache", description: "purge cache", annotations: { readOnlyHint: true, destructiveHint: true } },
+    { name: "fetch_url", description: "fetch cache url", annotations: { readOnlyHint: true, openWorldHint: true } },
+  ], 0.99);
+  const result = await router.findAndActivate("purge fetch cache url", JEV_THRESHOLD);
+  assert.deepEqual(result.activated, []);
+  assert.deepEqual(result.declined.sort(), ["fetch_url", "purge_cache"]);
+});
+
+test("routing keeps the task in state, not in each question", async () => {
+  const requests: any[] = [];
+  const jevClient = {
+    isConfigured: () => true,
+    evaluate: async (request: any) => { requests.push(request); return { answers: {}, model: "m", elapsedMs: 1 }; },
+  } as unknown as JevClient;
+  const pi: any = { getAllTools: () => BUILTINS, getActiveTools: () => [], setActiveTools: () => {} };
+  const prompt = "run the bash tool " + "x".repeat(10_000);
+  await new ToolRouter(pi, jevClient).findAndActivate(prompt);
+  const [request] = requests;
+  for (const q of Object.values<any>(request.questions)) assert.doesNotMatch(q.instructions, /xxxx/);
+  assert.ok(request.state.task.length < 4_100, "task text is capped");
+});
+
+test("tools annotated readOnlyHint activate without confirmation", async () => {
+  const { router } = routerWith([
+    { name: "docs_search", description: "search docs", annotations: { readOnlyHint: true } },
+    { name: "deploy", description: "deploy docs", annotations: { readOnlyHint: false } },
+  ], 0.99);
+  const result = await router.findAndActivate("search docs deploy", JEV_THRESHOLD);
+  assert.deepEqual(result.activated, ["docs_search"]);
+  assert.deepEqual(result.declined, ["deploy"]);
 });

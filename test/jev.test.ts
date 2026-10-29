@@ -35,6 +35,8 @@ test("JevClient stats sum SDK snake_case token usage", async () => {
       answers: { pick: { choice: "yes" } },
     }),
   };
+  // The client rebuilds when the active key changes; mark the stub as built for it.
+  (client as any).clientKey = "test-key";
 
   await client.evaluate({
     state: "state",

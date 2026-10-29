@@ -4,6 +4,7 @@ import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import * as path from "node:path";
+import { exitCodeFor } from "./exit-code.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -24,4 +25,4 @@ const result = spawnSync(
   { stdio: "inherit", env: process.env }
 );
 
-process.exit(result.status ?? 0);
+process.exit(exitCodeFor(result));

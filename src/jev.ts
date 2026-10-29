@@ -2,6 +2,7 @@ import { TypeSafeClient, choice, noul, score } from "@typesafe-ai/sdk";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
+import { redactDeep, redactText } from "./redact.js";
 import type {
   JevEvaluationRequest,
   JevEvaluationResponse,
@@ -15,6 +16,25 @@ type ActiveApiKey = { key: string; origin: string };
 
 export function resolveBaseURL(): string | null {
   return process.env.PI_JEV_BASE_URL?.trim() || process.env.TYPESAFE_BASE_URL?.trim() || null;
+}
+
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
+
+/**
+ * The API key and every payload travel to the base URL, so a custom endpoint
+ * must use https unless it is on this machine.
+ */
+export function assertSafeBaseURL(baseURL: string | null): void {
+  if (!baseURL) return;
+  let url: URL;
+  try {
+    url = new URL(baseURL);
+  } catch {
+    throw new Error(`Invalid PI_JEV_BASE_URL: ${baseURL}`);
+  }
+  if (url.protocol === "https:") return;
+  if (url.protocol === "http:" && LOOPBACK_HOSTS.has(url.hostname)) return;
+  throw new Error(`Refusing PI_JEV_BASE_URL ${url.origin}: use https, or http only on localhost.`);
 }
 
 /** Resolve the API key together with where it came from, for status reporting. */
@@ -45,9 +65,11 @@ export function resolveApiKeySource(): { key: string; source: ApiKeySource; orig
 
 export class JevClient {
   private client: TypeSafeClient | null = null;
+  private clientKey: string | null = null;
   private apiKey: string | null = null;
   private apiKeySetInSession = false;
   private baseURL: string | null = null;
+  private configuredCache?: { value: boolean; until: number };
   public stats: JevSessionStats = {
     requestsCount: 0,
     totalTokens: 0,
@@ -58,7 +80,13 @@ export class JevClient {
   }
 
   public isConfigured(): boolean {
-    return Boolean(resolveApiKeySource() || this.apiKey || this.getBaseURL());
+    // resolveApiKeySource performs filesystem reads; cache briefly so per-prompt
+    // callers do not hammer the disk. setApiKey invalidates immediately.
+    const now = Date.now();
+    if (this.configuredCache && this.configuredCache.until > now) return this.configuredCache.value;
+    const value = Boolean(resolveApiKeySource() || this.apiKey || this.getBaseURL());
+    this.configuredCache = { value, until: now + 5_000 };
+    return value;
   }
 
   private getActiveApiKey(): ActiveApiKey | null {
@@ -81,6 +109,8 @@ export class JevClient {
     this.apiKey = key;
     this.apiKeySetInSession = true;
     this.client = null;
+    this.clientKey = null;
+    this.configuredCache = undefined;
   }
 
   private getClient(): TypeSafeClient {
@@ -89,8 +119,12 @@ export class JevClient {
     if (!key && !baseURL) {
       throw new Error("Missing TYPESAFE_API_KEY. Set it in environment, ~/.pi/agent/secrets/typesafe_api_key, or set PI_JEV_BASE_URL for a compatible local endpoint.");
     }
-    if (!this.client) {
+    // Rebuild when the resolved key changed (rotation), not only when the
+    // client is missing — previously a rotated key was silently ignored.
+    if (!this.client || this.clientKey !== key) {
+      assertSafeBaseURL(baseURL);
       this.client = new TypeSafeClient({ apiKey: key ?? "", ...(baseURL ? { baseURL } : {}) });
+      this.clientKey = key;
     }
     return this.client;
   }
@@ -104,17 +138,22 @@ export class JevClient {
 
     const formattedQuestions: Record<string, any> = {};
     for (const [id, q] of Object.entries(request.questions)) {
+      // Instructions and criteria embed untrusted state (paths, entry text,
+      // prompts) — redact them at the same boundary as the state payload.
       if (q.type === "choice") {
-        formattedQuestions[id] = choice(q.instructions, q.criteria);
+        formattedQuestions[id] = choice(redactText(q.instructions), redactDeep(q.criteria));
       } else if (q.type === "noul") {
-        formattedQuestions[id] = noul(q.instructions);
+        formattedQuestions[id] = noul(redactText(q.instructions));
       } else if (q.type === "score") {
-        formattedQuestions[id] = score(q.instructions, q.criteria as any);
+        formattedQuestions[id] = score(redactText(q.instructions), redactDeep(q.criteria) as any);
       }
     }
 
-    const statePayload: any =
-      typeof request.state === "string" ? { text: request.state } : request.state;
+    // Single egress boundary: every feature's state passes through redaction
+    // before leaving the machine.
+    const statePayload: any = redactDeep(
+      typeof request.state === "string" ? { text: request.state } : request.state
+    );
 
     try {
       const response: any = await client.systemOne({
@@ -148,6 +187,7 @@ export class JevClient {
           answers[id] = {
             type: "noul",
             value: prob,
+            confidence: (rawAns as any).confidence,
             raw: rawAns,
           };
         } else if (qConfig.type === "score") {
