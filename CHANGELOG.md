@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-10-29
+
 ### Publishing
 - Publish this fork as `@leftytennis/pi-jev` with public access and fork repository metadata. The upstream `pi-jev` package is unchanged.
 - Update installation and CLI examples to use the scoped package. CI uses npm 11.5.1 for OIDC trusted publishing without a stored npm token.
