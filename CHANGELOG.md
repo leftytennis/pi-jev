@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `PI_JEV_BASE_URL` must be `https://`, or `http://` on loopback; the API key is no longer sent in cleartext to other hosts. A rotated API key now rebuilds the client.
 - `ProviderUsagePoller` is rebuilt on `collectPlatformUsage`: it uses Pi's credential resolution and polls only providers Pi has configured, instead of reading `~/.pi/agent/auth.json`, `~/.codex/auth.json`, and the keychain directly.
 - CI and publish workflows pin `actions/checkout` and `actions/setup-node` to the v4.4.0 commits, `ci.yml` gets a read-only `permissions` block, and the seven `@earendil-works/*` lockfile entries without integrity hashes now have them.
+- The publish workflow runs tests in a job with a read-only token and publishes from a separate `npm-publish` environment job that installs with `--ignore-scripts` and is the only job holding `id-token: write`.
 - README documents per-feature data egress and an owner-only key-file setup; SECURITY.md gains a data-egress section.
 
 ## [0.8.0] - 2026-10-07
