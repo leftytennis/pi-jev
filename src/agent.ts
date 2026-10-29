@@ -1,9 +1,20 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { JevClient } from "./jev.js";
+import { MAX_QUESTIONS, MAX_STATE_CHARS, capState } from "./limits.js";
 import type { QuestionConfig, JevEvaluationResponse } from "./types.js";
 
 const RPC_REQUEST = "subagents:rpc:v1:request";
 const RPC_REPLY = "subagents:rpc:v1:reply:";
+
+// Cost bounds for the model-reachable RPC path. The jev_evaluate tool caps a
+// single call at 24 questions so one model action cannot fire an unbounded
+// number of paid judgments; the RPC agent must hold the same line, and the
+// state payload is capped like jev-gate's 50 KB diff/file bound. Questions are
+// rejected rather than truncated: silently cutting an instruction would change
+// the judgment, while capping state marks the cut visibly.
+const MAX_QUESTIONS_CHARS = MAX_STATE_CHARS;
+/** RPC callers get a bounded evaluation; a lost reply must not hold a paid request open forever. */
+const RPC_TIMEOUT_MS = 30_000;
 
 export interface JevAgentTaskParams {
   task?: string;
@@ -35,9 +46,16 @@ export async function executeJevAgentTask(
   }
 
   let questions: Record<string, QuestionConfig> = {};
-  const state = params.state ?? params.task ?? "No state provided";
+  const state = capState(params.state ?? params.task ?? "No state provided");
 
   if (params.questions && Object.keys(params.questions).length > 0) {
+    const count = Object.keys(params.questions).length;
+    if (count > MAX_QUESTIONS) {
+      throw new Error(`Too many questions in one jev agent task (${count} > max ${MAX_QUESTIONS}). Split the evaluation.`);
+    }
+    if (JSON.stringify(params.questions).length > MAX_QUESTIONS_CHARS) {
+      throw new Error(`Questions payload exceeds ${MAX_QUESTIONS_CHARS} characters. Move bulk material into state and keep questions short.`);
+    }
     questions = params.questions;
   } else if (params.type === "choice") {
     questions["judgment"] = {
@@ -105,7 +123,9 @@ export class JevAgentHandler {
           model: req.params?.model ?? req.params?.args?.model,
         };
 
-        const result = await executeJevAgentTask(taskParams, this.jevClient);
+        // Bounded signal: without it a model-initiated RPC evaluation could
+        // run (and bill) indefinitely with no cancellation path.
+        const result = await executeJevAgentTask(taskParams, this.jevClient, AbortSignal.timeout(RPC_TIMEOUT_MS));
         this.pi.events.emit(replyEvent, {
           success: true,
           data: {

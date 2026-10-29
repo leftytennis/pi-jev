@@ -1,6 +1,6 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { JevClient } from "./jev.js";
-import type { ToolRouter } from "./router.js";
+import { routingTask, toolApplicabilityQuestion, type ToolRouter } from "./router.js";
 import type { SkillRouter } from "./skills.js";
 import { JEV_THRESHOLD, skillApplicabilityQuestion } from "./skills.js";
 import type { QuestionConfig } from "./types.js";
@@ -76,10 +76,7 @@ export class AutoJev {
       const questions: Record<string, QuestionConfig> = {};
 
       for (const c of toolCandidates) {
-        questions[`tool:${c.name}`] = {
-          type: "noul",
-          instructions: `Does the tool '${c.name}' (${c.description || "no description"}) directly help accomplish this task: "${prompt}"?`,
-        };
+        questions[`tool:${c.name}`] = toolApplicabilityQuestion(c.name, c.description);
       }
       for (const [index, s] of skillCandidates.entries()) {
         questions[`skill:${s.name}`] = skillApplicabilityQuestion(index);
@@ -89,19 +86,19 @@ export class AutoJev {
         ? {}
         : (await this.jevClient.evaluate(
             {
-              state: { task: prompt, tools: toolCandidates, available_skills: skillCandidates },
+              state: { task: routingTask(prompt), tools: toolCandidates, available_skills: skillCandidates },
               questions,
             },
             signal
           )).answers;
 
-      const activated = toolCandidates
+      const passed = toolCandidates
         .filter((c) => {
           const value = answers[`tool:${c.name}`]?.value;
           return typeof value === "number" && value >= JEV_THRESHOLD;
         })
         .map((c) => c.name);
-      this.router.activateTools(activated);
+      const activated = await this.router.activateTools(passed, ctx, signal);
 
       const skills = skillCandidates
         .map((s) => ({

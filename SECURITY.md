@@ -13,3 +13,20 @@ Please include:
 - Any suggested mitigations
 
 We will review reports promptly and publish patches with proper attribution.
+
+## Data Egress
+
+When its features are enabled, pi-jev sends evaluation state (prompts, tool
+arguments, error output, diffs, session entries) to the TypeSafe API endpoint
+configured by `TYPESAFE_API_KEY`. Common secret formats are redacted before
+transmission (`src/redact.ts`), and tool-guard skips calls touching
+secret-bearing paths entirely. See "Data sent to the TypeSafe API" in the
+README for the exact per-feature payloads, and keep opt-in flags off for
+sensitive work.
+
+## Release Pipeline
+
+Releases publish from GitHub Actions with npm provenance. The publish job runs
+only after the test job passes, installs with `--ignore-scripts`, and is the
+only job that holds an OIDC token. It runs in the `npm-publish` environment,
+where required reviewers can be added as a manual gate.

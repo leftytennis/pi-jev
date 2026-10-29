@@ -1,0 +1,130 @@
+{
+  "_comment": "25 recommended planning / architecture-review prompts collected from public prompt libraries, agent-skill repos, and vendor blogs (2026-09-27). Each entry keeps the operative instruction text of the published prompt; placeholder boilerplate ([tech_stack], {{PROJECT_NAME}}, pasted-document slots) is trimmed or filled with the source's own example values so the text matches what a user actually sends. `source` is the page the wording came from. The sureprompts entry is assembled from that article's stated instructions and worked example because the page describes the pattern rather than printing a copy box.",
+  "prompts": [
+    {
+      "id": "aitoolsguidebook-layering-violations",
+      "source": "aitoolsguidebook.com — Architecture Review Prompts, template 1",
+      "text": "You are a staff engineer reviewing this codebase for LAYERING violations only. Identify imports that cross layers in the wrong direction (UI importing infrastructure, domain importing framework, etc.). For each: file:line, the violating import, the layer rule it breaks, and a one-line refactor sketch. Do not propose rewrites. Return a markdown table with severity (Critical / High / Med). If layers are not explicit, first infer the intended layer model from folder names, then judge violations against that inferred model."
+    },
+    {
+      "id": "aitoolsguidebook-dependency-cycles",
+      "source": "aitoolsguidebook.com — Architecture Review Prompts, template 2",
+      "text": "Scan this repo for circular dependencies between modules and packages. Output: (1) each cycle as A -> B -> C -> A, (2) the import that creates each edge with file:line, (3) which edge is the cheapest to break, (4) a one-line break strategy (interface, event, move type). Ignore intra-file cycles."
+    },
+    {
+      "id": "aitoolsguidebook-boundary-leaks",
+      "source": "aitoolsguidebook.com — Architecture Review Prompts, template 3",
+      "text": "Audit MODULE BOUNDARIES. For each top-level module, list: (1) what types it exports as its public API, (2) types that leak through but are internal, such as DB rows surfacing in HTTP handlers, (3) internal types reached via deep imports like module/internal/... Flag every boundary leak with file:line."
+    },
+    {
+      "id": "aitoolsguidebook-hub-modules",
+      "source": "aitoolsguidebook.com — Architecture Review Prompts, template 4",
+      "text": "Find HUB modules: any module with more than 5 incoming imports or more than 10 outgoing imports. For each, list the fan-in and fan-out count, the responsibilities tangled inside, and propose a split into 2-3 cohesive submodules. Do not write the refactor, only the split plan."
+    },
+    {
+      "id": "aitoolsguidebook-data-flow",
+      "source": "aitoolsguidebook.com — Architecture Review Prompts, template 5",
+      "text": "Trace DATA FLOW for the 3 most important entities, inferring them from naming if not told. For each: (1) where it is created, (2) where it is mutated, (3) where it is read across module boundaries. Flag any surprise mutation, meaning state changing in a module that the entity does not belong to."
+    },
+    {
+      "id": "aitoolsguidebook-hexagonal",
+      "source": "aitoolsguidebook.com — Architecture Review Prompts, template 6",
+      "text": "Evaluate this codebase against ports-and-adapters: (1) Is domain logic isolated from frameworks? Cite evidence. (2) Are external systems such as the database, queue, and HTTP reached through interfaces or directly? List each direct call with file:line. (3) Where would mocking be hard right now? Rate adherence 1-5 with rationale."
+    },
+    {
+      "id": "aitoolsguidebook-multi-service",
+      "source": "aitoolsguidebook.com — Architecture Review Prompts, template 14",
+      "text": "This monorepo contains web (Next.js), api (FastAPI), and worker (Go). Audit the SERVICE boundaries: (1) Which packages are imported across service lines? (2) Where do contract types diverge between services? (3) Is there shared DB access, which is an anti-pattern? (4) Suggest one boundary to harden first."
+    },
+    {
+      "id": "aitoolsguidebook-adr-backfill",
+      "source": "aitoolsguidebook.com — Architecture Review Prompts, template 15",
+      "text": "Take the architecture findings from the previous prompts. For each significant decision implied or contradicted by the code, draft a short ADR: Title, Status (Accepted / Proposed / Deprecated), Context in 2 sentences, Decision in 1 sentence, Consequences in 3 bullets. Output 5 ADRs maximum, ranked by impact."
+    },
+    {
+      "id": "docsbot-repository-architecture-review",
+      "source": "docsbot.ai — Repository Architecture Review",
+      "text": "You are a software engineering assistant assigned to conduct a thorough architectural and structural review of a given code repository. Analyze the repository in detail and produce a comprehensive Markdown audit report for docs/ARCHITECTURE_REVIEW.md covering: an architecture map as an ASCII diagram of key modules, data flow, state management, and external dependencies; cohesion and coupling smells with proposed boundaries and abstractions; a deterministic offline smoke test with the exact command; a root layout reorganization with before and after trees and a minimal git mv plan of at most 20 commands; operational readiness across environment and secrets, logging and metrics, determinism, caching, and CI; a risk register of the top 10 failure modes with impact, mitigations, and tests; and a quality bar assessing documentation debt, typing gaps, and error messaging. Act as a cross-functional review board of a Principal Architect, an ML Lead, an SRE, a Security Officer, and a Product Engineer. Review the entire existing repository without speculation about future features."
+    },
+    {
+      "id": "sureprompts-stress-test-decision",
+      "source": "sureprompts.com — AI Architecture Review Prompts, pattern 3 (stress-testing a decision)",
+      "text": "You are a skeptical senior infrastructure engineer whose job is to find the flaw. Stress-test this single decision: we chose a relational database (Postgres) for a write-heavy event ingestion service, reasoning that the team knows SQL and we already run Postgres. Argue against the decision, not for it. Attack the assumptions the reasoning depends on, the alternative choices, and the operational realities that could invalidate it: at what write volume does write amplification become the bottleneck, what happens when the write-ahead log saturates disk I/O, and does the team knows SQL still hold when the operational burden shifts to vacuum tuning and partition management. Surface failure cases; do not conclude that the choice is fine."
+    },
+    {
+      "id": "mejba-architecture-review-for-scale",
+      "source": "mejba.me — Claude/ChatGPT (or Cursor) Prompt to Run an Architecture Review",
+      "text": "You are a senior architect reviewing a system for scale. Return impact-ranked findings with concrete code for the top fixes, not abstract principles. Context: web application; tech stack Laravel, MySQL, Redis, Vue.js; current scale 10K daily users; target scale 100K daily users. Deliver: (1) an analysis of the current architecture pattern and whether it fits the target scale, (2) a coupling and cohesion assessment naming the worst-coupled modules, (3) the scalability bottlenecks that break first as load grows, with the failure mode, (4) security architecture gaps, especially around trust boundaries and data access, (5) improvements ranked by impact-to-effort, (6) concrete before/after code for the top three recommendations. Ground every finding in how the system moves from current to target scale."
+    },
+    {
+      "id": "claudient-staff-architect-review",
+      "source": "github.com/Claudient/Claudient — prompts/task-specific/architecture-reviewer.md",
+      "text": "You are a staff-level software architect reviewing a system design. Your goal is to identify real problems that will matter in production, not theoretical issues or premature optimisations. Review the architecture against these concerns in priority order: correctness (data consistency risks, race conditions, unhandled failure modes), reliability (single points of failure, dependency outages, graceful degradation), scalability (bottlenecks, what breaks first as traffic grows, whether state allows horizontal scaling), security (authentication and authorisation at every boundary, data protected in transit and at rest, minimised attack surface), and operability (observability, zero-downtime deploys, rollback, sustainable on-call). For each concern found give severity, the specific problem, the production impact, and a concrete recommendation. The system is a multi-tenant SaaS for project management: Next.js on Vercel, a single Express instance on Railway, a single PostgreSQL instance with row-level tenant isolation, and Redis for sessions; 500 customers and 50K requests a day today, 5,000 customers and 500K requests a day in 12 months, two engineers on a startup budget. Is our database architecture going to hold up as we scale?"
+    },
+    {
+      "id": "promptailearning-system-design",
+      "source": "promptailearning.com — System Design: Full Architecture (Claude)",
+      "text": "You are a principal engineer at a FAANG-level company. Design the backend architecture for a real-time collaborative document editor like Notion. Walk through each phase using chain-of-thought: (1) requirements clarification, functional versus non-functional, with scale assumptions for DAU, QPS, and data volume, (2) high-level design with core components and a data flow diagram in ASCII or Mermaid, (3) deep dives into the database schema justifying SQL versus NoSQL, the caching strategy across Redis and CDN layers, and the message queue design, (4) API design with key endpoints and request and response shapes, (5) bottleneck identification and mitigation, (6) the trade-offs you consciously accepted. Constraints: 10M DAU, 99.99% uptime SLA, global deployment."
+    },
+    {
+      "id": "kumaran-plan-mode-architecture-phase",
+      "source": "github.com/kumaran-is/claude-code-onboarding — plan-mode-review skill, Phase 1",
+      "text": "Review this implementation plan in Big Change mode. Phase 1, architecture review: evaluate system design and component boundaries, the dependency graph and coupling, data flow patterns and bottlenecks, scaling characteristics and single points of failure, and the security architecture across auth, data access, and API boundaries. Generate a Mermaid or ASCII diagram of the current architecture before discussing issues. Then assess blast radius, rollback strategy, dependency health, cost and infrastructure impact, data migration, and second-order effects before approving. If you cannot verify a claim, mark it UNVERIFIED with the command or URL needed to check it; never fabricate evidence."
+    },
+    {
+      "id": "kadenn-full-review-architecture-phase",
+      "source": "github.com/kadenn/full-review — architecture-first code review skill",
+      "text": "Run a full architecture-first review of this branch. Phase 1, architecture: answer six high-altitude questions about the change. Is it in the right place? Is it the right abstraction? Is it the right thing to do at all? Does the repo already have this? Is it consistent with how the codebase solves this class of problem? Is it complete across the service chain? Read beyond the diff: callers, siblings, repo conventions, and the other repos in the cross-service chain. Reach an Architecture Verdict and lock it before any line-level findings. Stop after Phase 1 and settle the design with me before descending into implementation review."
+    },
+    {
+      "id": "voltagent-architect-reviewer",
+      "source": "github.com/VoltAgent/awesome-claude-code-subagents — architect-reviewer agent",
+      "text": "You are a senior architecture reviewer with expertise in evaluating system designs, architectural decisions, and technology choices. Review the architectural diagrams, design documents, and technology choices for this system and analyze scalability, maintainability, security, and evolution potential. Verify that design patterns are appropriate, scalability requirements are met, technology choices are justified, integration patterns are sound, the security architecture is robust, technical debt is manageable, and the evolution path is clear. Start with the big picture, drill into details, cross-reference requirements, consider alternatives, assess trade-offs, and provide strategic recommendations for architectural improvements that balance ideal architecture with practical constraints."
+    },
+    {
+      "id": "archstandard-arb-governance-review",
+      "source": "archstandard.org — LLM Prompt: Architecture Governance Review",
+      "text": "You are the Chair of an Architecture Review Board reviewing the attached Solution Architecture Document. Conduct a governance review for the Board. Determine whether the solution is aligned with organisational strategy, standards, and principles; appropriate for the business context, criticality, and risk appetite; consistent with other solutions in the portfolio; governable within existing processes; and accountable with clear ownership. Check strategic fit and shared-service reuse, whether documentation depth is proportionate to the business criticality tier, whether risks have named owners and architecture decisions are recorded with rationale and alternatives, whether capex and opex are documented, whether the operational model and exit strategy are defined, whether regulatory obligations are mapped to design elements, and whether the solution introduces new technologies, dependencies, duplication, or technical debt to the estate. Do not re-do the security, privacy, or financial reviews; confirm they have been addressed. Produce an ARB review record with a decision of Approved, Approved with Conditions, Deferred, or Rejected, citing section numbers."
+    },
+    {
+      "id": "maverick-solutions-design-audit",
+      "source": "github.com/thermiteau/maverick-validate — prompts/03-solutions-design.md",
+      "text": "You are a software architect assessing whether this system was designed or merely accreted one AI prompt at a time. Conduct a read-only investigation of design quality and intentionality. Is there any design record, such as design docs, ADRs, diagrams, or written rationale for major choices? Is there a discernible architecture with layers, modules, and separation of concerns, or is logic smeared across giant files? Can you tell why things exist, or is there dead and speculative code? Is there one way of doing things, or three HTTP clients and two state-management patterns? Is complexity appropriate, or are there over-engineered abstractions with a single caller and dangerously under-designed 2000-line files? Is the data model coherent and normalised enough for the domain? Are external integrations for payments, auth, email, and LLM APIs isolated behind clear seams? Score maturity 0-5 and write the report to audit/solutions-design.md."
+    },
+    {
+      "id": "callsphere-design-document-review",
+      "source": "callsphere.ai — AI-Assisted Architecture Review, ARCHITECTURE_REVIEW_PROMPT",
+      "text": "You are a senior software architect conducting a design review. Analyze the following design document and provide structured feedback across these dimensions: scalability (will this handle 10x and 100x current load and where are the bottlenecks), reliability (failure modes, single points of failure, graceful degradation), security (authentication and authorization gaps, data exposure, input validation), operational complexity (how hard is this to deploy, monitor, and debug in production), data consistency (race conditions and whether the consistency model is appropriate), and cost (over-provisioning, missing caching, cost-inefficient patterns). Rate each dimension STRONG, ADEQUATE, NEEDS_WORK, or CRITICAL_GAP with specific, actionable feedback and relevant patterns or alternatives. Also identify assumptions that should be validated, questions the design does not answer, and similar systems or prior art worth studying."
+    },
+    {
+      "id": "callsphere-scalability-assessment",
+      "source": "callsphere.ai — AI-Assisted Architecture Review, assess_scalability",
+      "text": "Perform a scalability assessment of this architecture against these load scenarios: steady state at 500 req/sec with 200ms p99, launch spike at 5,000 req/sec with 500ms p99, and 12-month growth at 20,000 req/sec with 300ms p99. For each scenario analyze which component becomes the bottleneck first, the approximate maximum throughput before degradation, the specific changes needed to handle the target load, and the cost implications of scaling to it. Use back-of-envelope calculations and be specific about numbers: connection pool sizes, database connections, memory usage estimates, and network bandwidth requirements."
+    },
+    {
+      "id": "callsphere-pr-architecture-review",
+      "source": "callsphere.ai — AI-Assisted Architecture Review, review_pr_architecture",
+      "text": "Review this pull request from an architecture perspective. Do not review individual code style or syntax. Focus on: does this change introduce new architectural patterns; are cross-cutting concerns such as logging, auth, and error handling handled consistently; does this change affect system boundaries or API contracts; are there missing abstractions or unnecessary abstractions; and will this change complicate future scaling or maintenance."
+    },
+    {
+      "id": "callsphere-tradeoff-analysis",
+      "source": "callsphere.ai — AI-Assisted Architecture Review, analyze_tradeoffs",
+      "text": "Analyze the architectural trade-offs for this decision: how should we handle event processing for our order system? Constraints: 500K events per day, 99.9% uptime, a team of 4 backend engineers, existing AWS infrastructure, and a budget of $5K per month. Consider at least 3 viable options, such as direct database polling, SQS with Lambda, Kafka on MSK, and EventBridge. Score each on scalability, complexity, and cost from 1 to 5, list pros, cons, time to implement, and risks, and provide a recommendation with clear reasoning."
+    },
+    {
+      "id": "codenamev-specialist-review-dispatch",
+      "source": "github.com/codenamev/ai-software-architect — architecture-review skill, subagent prompt template",
+      "text": "Conduct a focused review of the payments module. Apply your perspective and stay within your specialty; other team members are reviewing concurrently and will cover their own areas. Return a markdown review with a perspective statement in 1-2 sentences, 3-5 key observations, 3-5 strengths within your domain, concerns with severity (critical / high / medium / low) each with location as file:line where applicable, why it matters, and a concrete fix, recommendations ordered immediate / short-term / long-term with rough S/M/L effort estimates, and risks if unaddressed. Read code, configs, and ADRs as needed. Cite exact file paths and line numbers."
+    },
+    {
+      "id": "hex0xdeadbeef-plan-reviewer",
+      "source": "github.com/hex0xdeadbeef/claude-kit — .claude/agents/plan-reviewer.md",
+      "text": "You are the Architecture Reviewer. Review this implementation plan for architecture compliance, completeness, and security before coding begins. Never modify the plan; only recommend changes. Read the plan from scratch and verify the required sections are present: Context, Scope with IN and OUT, Dependencies, Parts with code examples, Acceptance criteria, and Testing plan. Validate architecture: check layer-dependency compliance against the project's layer rule, check domain purity so entities carry no encoding or JSON tags, and check error-handling patterns so errors are wrapped per convention and never both logged and returned. Classify every issue as BLOCKER, MAJOR, or MINOR with category, location by Part, problem, and a concrete suggestion. Never approve a plan with BLOCKER issues. Output a verdict of APPROVED, NEEDS_CHANGES, or REJECTED with a justified summary and a handoff for the coder."
+    },
+    {
+      "id": "ozimmer-adr-review-checklist",
+      "source": "ozimmer.ch — How to review Architectural Decision Records, ADR checklist",
+      "text": "Review this architectural decision record against these seven questions. Is the problem relevant enough to be solved and recorded in an ADR? Do the options have a chance to solve the problem, and are valid options missing? Are the decision drivers mutually exclusive and collectively exhaustive? Is the chosen option justified by the drivers, and is the rationale traceable? Are the consequences, both positive and negative, spelled out honestly? Is the record complete, current, and consistent with related decisions? Make every comment actionable with a concrete recommendation and example."
+    }
+  ]
+}

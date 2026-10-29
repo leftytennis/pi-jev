@@ -1,6 +1,10 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { JevClient } from "./jev.js";
 import { isJevTool } from "./types.js";
+import { capText, referencesSecretPath } from "./redact.js";
+
+/** Upper bound on serialized tool-call/error payloads sent for judgment. */
+const MAX_PAYLOAD_CHARS = 4_096;
 
 export interface ToolCallCheckResult {
   valid: boolean;
@@ -67,13 +71,19 @@ export class ToolGuard {
     if (!this.enabled || !this.jevClient.isConfigured() || isJevTool(toolName)) {
       return { valid: true, elapsedMs: 0 };
     }
+    // Writing to secret-bearing paths is exactly the behavior to allow, not a
+    // hallucination signal — and sending those bodies outward is unacceptable.
+    // Skip evaluation entirely and let the write proceed.
+    if (referencesSecretPath(input)) {
+      return { valid: true, elapsedMs: Date.now() - startTime };
+    }
 
     try {
       const response = await this.jevClient.evaluate(
         {
           state: {
             tool: toolName,
-            parameters: input,
+            parameters: capText(JSON.stringify(input ?? null), MAX_PAYLOAD_CHARS),
           },
           questions: {
             is_hallucinated: {
@@ -82,7 +92,8 @@ export class ToolGuard {
             },
           },
         },
-        signal
+        signal ? AbortSignal.any([signal, AbortSignal.timeout(3_000)]) : AbortSignal.timeout(3_000),
+        { retry: { maxRetries: 0 } }
       );
 
       const prob = Number(response.answers["is_hallucinated"]?.value ?? 0);
@@ -111,14 +122,16 @@ export class ToolGuard {
     signal?: AbortSignal
   ): Promise<string | null> {
     if (!this.enabled || !this.jevClient.isConfigured()) return null;
+    // Failed calls can contain the same sensitive arguments as successful ones.
+    if (referencesSecretPath(input)) return null;
 
     try {
-      const errorText = JSON.stringify(content);
+      const errorText = capText(JSON.stringify(content), MAX_PAYLOAD_CHARS);
       const response = await this.jevClient.evaluate(
         {
           state: {
             tool: toolName,
-            input,
+            input: capText(JSON.stringify(input ?? null), MAX_PAYLOAD_CHARS),
             error: errorText,
           },
           questions: {
@@ -134,7 +147,8 @@ export class ToolGuard {
             },
           },
         },
-        signal
+        signal ? AbortSignal.any([signal, AbortSignal.timeout(3_000)]) : AbortSignal.timeout(3_000),
+        { retry: { maxRetries: 0 } }
       );
 
       const cause = String(response.answers["error_category"]?.value ?? "");

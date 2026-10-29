@@ -40,6 +40,10 @@ test("parseTierOverlay rejects the whole file on any malformed entry", () => {
     JSON.stringify({ tiers: { "a/b": 6 } }),
     JSON.stringify({ tiers: { "a/b": 2.5 } }),
     JSON.stringify({ tiers: { "a/b": "great" } }),
+    JSON.stringify({ tiers: { "a/b": "constructor" } }),
+    JSON.stringify({ tiers: { "a/b": "__proto__" } }),
+    JSON.stringify({ tiers: { "a/b": "toString" } }),
+    JSON.stringify({ tiers: { "a/b": "hasOwnProperty" } }),
   ]) {
     const result = parseTierOverlay(raw);
     assert.ok("error" in result, `expected rejection for ${raw}`);

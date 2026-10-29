@@ -1,0 +1,130 @@
+{
+  "_comment": "25 recommended security-audit prompts collected from public prompt libraries and vendor docs (2026-09-26). Each entry keeps the operative instruction text of the published prompt; placeholder boilerplate ({{code}} blocks, variable tables) is trimmed so the text matches what a user actually sends. `source` is the page the wording came from.",
+  "prompts": [
+    {
+      "id": "copilot-analyze",
+      "source": "docs.github.com — Copilot Chat cookbook",
+      "text": "Analyze this code for potential security vulnerabilities and suggest fixes."
+    },
+    {
+      "id": "devtoolkit-code-audit",
+      "source": "devtoolkit.sh — Security Code Audit Prompt",
+      "text": "You are a security engineer performing a code audit focused on finding exploitable vulnerabilities. Language/Framework: Node.js with Express 4. Threat model: unauthenticated internet user. Standards: OWASP Top 10 2021. Audit the following code for Injection (SQL, command, LDAP, XPath), Broken Authentication and session management, Sensitive Data Exposure, XML/JSON parsing vulnerabilities, Broken Access Control, Security Misconfiguration, Cross-Site Scripting, Insecure Deserialisation, and Using Components with Known Vulnerabilities. For each finding provide the OWASP category, severity on the CVSS v3 scale, location, a proof of concept showing how an attacker would exploit it, and the specific remediation code change."
+    },
+    {
+      "id": "security-recipes-repo-audit",
+      "source": "security-recipes.ai — OWASP Top 10:2025 repo audit",
+      "text": "You are performing a security posture audit of this repository against the OWASP Web Application Top 10:2025. Run read-only; do not edit files. First infer and record the primary language and framework, entry points (HTTP routes, gRPC services, queue consumers, scheduled jobs), authentication mechanism, data stores touched, external services called, secret handling, and CI/deployment pipeline. Then walk each OWASP category (A01 Broken Access Control, A02 Security Misconfiguration, A03 Software Supply Chain Failures, A04 Cryptographic Failures, A05 Injection, A06 Insecure Design, A07 Authentication Failures, A08 Software or Data Integrity Failures, A09 Security Logging and Alerting Failures, A10 Mishandling of Exceptional Conditions) and for each say what the weakness would look like in this codebase, whether you found instances with file paths and line numbers, and what would fix it. Score every finding by severity, blast radius, and confidence, then emit a prioritised report."
+    },
+    {
+      "id": "mejba-endpoint-review",
+      "source": "mejba.me — OWASP Top 10 review of an API endpoint",
+      "text": "You are a senior application security engineer. Be precise and evidence-driven; return real remediation code, not advice. Endpoint: POST /api/v1/users/{id}/avatar. Auth model: Sanctum bearer token, policy-gated. Walk the 2025 OWASP Top 10 and for each risk state present yes or no, cite the exact lines of evidence from the code for any yes, give a rough CVSS severity with a one-line justification, provide a concrete remediation code change, and write a regression test that fails before the fix and passes after. Apply extra scrutiny to broken access control, injection, and SSRF."
+    },
+    {
+      "id": "lockllm-stride",
+      "source": "lockllm.com — STRIDE threat modeling prompt",
+      "text": "Act as a Lead Security Architect. Perform a rigorous threat modeling exercise using the OWASP STRIDE methodology for a new feature: a passwordless login system via email magic links for our SaaS platform. Analyze the feature against all six STRIDE categories, thinking like an advanced persistent threat actor looking for logical flaws in the authentication flow. For each category give a realistic attack scenario specific to magic link implementations, the exact security control it violates, and two actionable technical mitigations we must implement in our backend code."
+    },
+    {
+      "id": "lockllm-harsh-auditor",
+      "source": "lockllm.com — The Harsh Security Auditor prompt",
+      "text": "Act as a Principal Application Security Auditor. Perform a ruthless, deep security audit on the following code which handles user profile updates and file uploads. Check injection vectors including SQLi, NoSQLi, OS command injection and LDAP injection, looking specifically for string concatenation in database queries or user input passed to system commands. Check auth and session management for session fixation, privilege escalation, and missing authorization checks on protected routes. Identify sensitive data logged to the console or leaked in error messages. Flag missing sanitization and unsafe type coercion. Verify file upload handling for missing MIME validation or path traversal. For every finding give severity, a step-by-step attack scenario, the exact remediation code, and the OWASP or CWE classification. Be exceedingly harsh."
+    },
+    {
+      "id": "lockllm-nmap-triage",
+      "source": "lockllm.com — Parsing Nmap output for rapid triage",
+      "text": "Act as a Senior Red Team Operator. Review the following raw Nmap scan output from an authorized external perimeter assessment. Identify all open ports and categorize their associated services, highlight any services that present immediate critical risks when exposed directly to the public internet, cross-reference these specific service versions with known historical CVEs and common misconfiguration patterns, and suggest three specific exploit paths I should validate first based on this footprint."
+    },
+    {
+      "id": "lockllm-scanner-triage",
+      "source": "lockllm.com — Interpreting vulnerability scanners",
+      "text": "Act as a Security Operations Center Analyst Tier 3. I am providing a CSV export of our latest weekly vulnerability scan. Filter this list down to the top 5 most critical vulnerabilities that require immediate remediation today. Base your prioritization on the presence of known public exploits using EPSS scores, the exposure level of the asset (internet-facing versus internal), and the potential impact on critical business data. Provide a brief justification for why each of the 5 items was selected over the others."
+    },
+    {
+      "id": "lockllm-iac-audit",
+      "source": "lockllm.com — Infrastructure-as-Code audit prompt",
+      "text": "Act as a Senior Cloud Security Architect specializing in multi-cloud environments. Review the following Terraform configuration that defines our new production microservices architecture. Identify overly permissive IAM roles, missing MFA enforcement, and wildcard actions violating least privilege. Review VPC, subnet, and security group configurations for resources exposing sensitive internal ports to 0.0.0.0/0. Ensure all storage buckets, databases, and message queues enforce at-rest encryption using customer-managed keys. Verify CloudTrail, VPC Flow Logs, and centralized logging are enabled and protected against tampering. Link each policy violation to the relevant regulatory framework and provide the corrected Terraform code."
+    },
+    {
+      "id": "lockllm-memory-race",
+      "source": "lockllm.com — Memory leaks and resource exhaustion prompt",
+      "text": "Analyze the following C++ function for potential memory leaks, race conditions, and resource exhaustion vulnerabilities. Extract the complete data flow paths from every point of memory allocation to the end of the function. Determine if any execution path fails to release allocated memory, paying special attention to early return statements and exception handling blocks. Identify iterative loops that could be manipulated by user-controlled input to cause CPU exhaustion. Review shared state mutations across concurrent threads for race conditions. Give the specific line numbers and a safe implementation using smart pointers and appropriate concurrency locks."
+    },
+    {
+      "id": "lockllm-soc2-evidence",
+      "source": "lockllm.com — SOC 2 evidence gathering prompt",
+      "text": "Act as a strict Compliance Auditor specializing in the SOC 2 Type II framework. Review the following raw system logs, deployment records, and version history data. Identify explicit evidence supporting continuous logical access monitoring and identity management controls. Verify the presence of deployment approvals, automated testing logs, and successful rollback traces, flagging gaps where version history or approval records are missing. Look for proof of data deletion capabilities with lineage tied to explicit request IDs. Generate an auditor-ready summary mapping log events to specific SOC 2 criteria and highlight any gaps that would result in an audit exception."
+    },
+    {
+      "id": "lockllm-phishing-sim",
+      "source": "lockllm.com — Authorized social engineering simulation prompt",
+      "text": "Act as a Red Team Operator conducting an authorized social engineering simulation for a client engagement. Target profile: a mid-sized healthcare provider that recently announced a migration to a new cloud-based patient records system. Generate three distinct spear-phishing email templates for security awareness training, each using a different psychological trigger: urgency and fear, authority and compliance, and familiarity and trust. Explain the psychological mechanics behind why each template is likely to succeed against the target demographic. This output is strictly for authorized employee security awareness training; do not include actual malicious payloads or real credential harvesting links."
+    },
+    {
+      "id": "ostorlab-role-assignment",
+      "source": "docs.ostorlab.co — AI Pentest Prompt Guide, role assignment",
+      "text": "You are an experienced penetration tester and security analyst with expertise in web application security, network security, and vulnerability assessment."
+    },
+    {
+      "id": "ostorlab-specific-sqli",
+      "source": "docs.ostorlab.co — AI Pentest Prompt Guide, clear task definition",
+      "text": "Analyze this web application for SQL injection vulnerabilities in the login form, focusing on input validation and parameterized queries."
+    },
+    {
+      "id": "ostorlab-chain-of-thought",
+      "source": "docs.ostorlab.co — AI Pentest Prompt Guide, chain of thought",
+      "text": "Analyze the following code for security vulnerabilities. For each potential issue: 1. Identify the vulnerability type. 2. Explain the potential impact. 3. Provide a specific remediation recommendation. 4. Rate the severity as Critical, High, Medium, or Low."
+    },
+    {
+      "id": "ostorlab-api-assessment",
+      "source": "docs.ostorlab.co — API security assessment template",
+      "text": "You are an API security expert specializing in REST, GraphQL, and other API technologies. Conduct a comprehensive API security assessment covering authentication and authorization vulnerabilities, input validation and injection attacks, rate limiting and DoS protection, data exposure and information leakage, business logic vulnerabilities, API versioning and deprecation security, and CORS and cross-origin policies. Provide specific test cases and curl commands for validation."
+    },
+    {
+      "id": "ostorlab-mobile-assessment",
+      "source": "docs.ostorlab.co — Mobile application security assessment template",
+      "text": "You are a mobile security specialist analyzing mobile application security. Perform a mobile security analysis focusing on platform-specific security controls for iOS and Android, data storage security including keychain and shared preferences, network communication security including certificate pinning and encryption, authentication and authorization mechanisms, runtime protection and anti-tampering measures, privacy and permission model compliance, and an OWASP Mobile Top 10 assessment."
+    },
+    {
+      "id": "ostorlab-retest-validation",
+      "source": "docs.ostorlab.co — Vulnerability retest and bug bounty validation",
+      "text": "You are a senior security analyst validating and retesting reported vulnerabilities. Perform thorough validation by reproducing the original vulnerability using the provided proof of concept, testing variations and edge cases of the reported issue, validating the effectiveness of the implemented remediation, assessing potential bypass techniques for the fix, confirming the actual risk level and business impact, and documenting any residual risks or incomplete fixes. Provide a retest report stating whether the vulnerability is confirmed, fixed, partially fixed, or a false positive, with evidence of testing performed."
+    },
+    {
+      "id": "ostorlab-generic-assessment",
+      "source": "docs.ostorlab.co — Generic security test scenario",
+      "text": "You are a security consultant performing a general security assessment. Conduct a comprehensive security evaluation covering common vulnerability patterns for this technology stack, configuration and deployment security, authentication and access control mechanisms, data protection and privacy considerations, and security monitoring and logging capabilities. Provide a prioritized list of findings with risk ratings and remediation timelines."
+    },
+    {
+      "id": "ajgeddes-security-code-auditor",
+      "source": "aj-geddes.github.io — Security Code Auditor",
+      "text": "Perform a security-focused code review identifying vulnerabilities, insecure patterns, and compliance gaps against the OWASP Top 10 and language-specific security best practices. Produce prioritized findings with severity ratings, proof-of-concept exploit descriptions for understanding, and concrete remediation code. Focus on code handling user input, file uploads, and external API calls."
+    },
+    {
+      "id": "aipromptsx-five-phase",
+      "source": "aipromptsx.com — Security Code Auditor, 5-phase audit",
+      "text": "I want you to act as a senior application security engineer with 15 years of combined offensive experience in bug bounty, CTF, and red team work, and defensive experience in secure code review and AppSec program leadership. Run a five-phase adversarial audit of the code I provide, mapping every finding to the OWASP Top 10 and CWE Top 25, scoring it with CVSS 3.1, and returning patch-ready findings with exploit scenarios and test cases."
+    },
+    {
+      "id": "bopenio-code-auditor",
+      "source": "github.com/b-open-io/prompts — code-auditor agent",
+      "text": "Audit this code for security issues and review this PR for vulnerabilities. Check for injection risks and run a security review before merge. Produce a severity-rated report with specific fixes, using git diff review together with Semgrep, CodeQL, and Trail of Bits patterns. Observe the code carefully before drawing conclusions."
+    },
+    {
+      "id": "liatrio-security-reviewer",
+      "source": "github.com/liatrio-labs/claude-code-gauntlet — security-reviewer agent",
+      "text": "You are a security-focused code reviewer. Review these code changes for security vulnerabilities, focusing on the OWASP Top 10, authentication issues, data exposure, and cryptographic problems. Your job is to find vulnerabilities that an attacker could exploit, not theoretical risks but concrete attack vectors in the code changes. Remember that a function which is safe today because its input comes from config may become unsafe when that input becomes user-controlled."
+    },
+    {
+      "id": "owasp-ai-supply-chain",
+      "source": "cheatsheetseries.owasp.org — Secure Coding with AI Cheat Sheet",
+      "text": "Review every package this change adds for hallucinated or typosquatted dependencies. Verify each package actually exists on the registry, check for unpinned versions, and flag any postinstall scripts that execute arbitrary code. Also review our CI configuration for review bots and runners that act on pull request content while holding org secrets, since a malicious PR can turn a CI agent into a confused deputy that exfiltrates those secrets."
+    },
+    {
+      "id": "davila7-llm-security-review",
+      "source": "github.com/davila7/claude-code-templates — se-security-reviewer agent",
+      "text": "Review this code for AI and LLM security risks alongside the OWASP Top 10. Identify prompt injection paths where untrusted text reaches a system prompt or tool call, tool-call boundaries that lack validation, secrets exposed in agent context, and Zero Trust violations where a component trusts input it should verify."
+    }
+  ]
+}

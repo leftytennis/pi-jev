@@ -50,6 +50,7 @@ export function registerJevCommands(
 
       if (sub === "status" || sub === "") {
         const origin = jevClient.getKeyOrigin();
+        const warning = jevClient.getKeyWarning();
         const endpoint = jevClient.getBaseURL?.() ?? null;
         const activeTools = pi.getActiveTools();
         const allTools = pi.getAllTools();
@@ -62,12 +63,13 @@ export function registerJevCommands(
           `Jev Status:\n` +
             `• Configured: ${origin || endpoint ? `Yes${origin ? ` (from ${origin})` : " (custom endpoint, no API key)"}` : "No"}\n` +
             `• Endpoint: ${endpoint ?? "TypeSafe default"}\n` +
+            (warning ? `• Key warning: ${warning}\n` : "") +
             `• Requests in session: ${jevClient.stats.requestsCount}\n` +
             `• Total tokens used: ${jevClient.stats.totalTokens}\n` +
             `• Auto mode: ${auto.enabled ? "on" : "off"}${auto.enabled && !jevClient.isConfigured() ? " (inactive: Jev unconfigured)" : ""}\n` +
             `• Auto-model: ${modelMode.enabled ? "on" : "off"}\n` +
             `• Auto thinking: ${thinkingMode.enabled ? "on" : "off"}\n` +
-            `• Tool guard: ${guardMode.enabled ? "on" : "off"}\n` +
+            `• Tool guard: ${guardMode.enabled ? "on" : "off"} (anti-hallucination aid, not a security control; fails open on error or 3s timeout; no retries)\n` +
             `• Jev compaction: ${compactMode.enabled ? "on" : "off"}\n` +
             `• Agent orchestration: ${agentMode.enabled ? "on" : "off"}\n` +
             `• Active tools: ${activeTools.length} / Available: ${allTools.length} (${routable} routable)\n` +
@@ -180,7 +182,7 @@ export function registerJevCommands(
         ctx.ui.notify(
           `Matching skills for "${query}":\n` +
             res.recommended
-              .map((r) => `• /skill:${r.name} (P=${r.probability.toFixed(2)}) - ${r.description}`)
+              .map((r) => `• /${r.name.startsWith("skill:") ? r.name : `skill:${r.name}`} (P=${r.probability.toFixed(2)}) - ${r.description}`)
               .join("\n") +
             (res.fallbackUsed
               ? "\n(Note: Jev unconfigured/offline — local keyword shortlist, probabilities are not Jev judgments)"

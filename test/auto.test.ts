@@ -26,9 +26,10 @@ function stubs(configured = true) {
   } as unknown as JevClient;
   const router = {
     shortlist: () => [{ name: "docker_logs", description: "Docker logs" }],
-    activateTools: (tools: string[]) => {
+    activateTools: async (tools: string[]) => {
       calls.activate += 1;
       assert.deepEqual(tools, ["docker_logs"]);
+      return tools;
     },
   } as unknown as ToolRouter;
   const skillRouter = {
@@ -98,7 +99,7 @@ test("AutoJev ignores slash commands and concurrent prompts, and never throws", 
         return { answers: {}, model: "test", elapsedMs: 1 };
       },
     } as unknown as JevClient,
-    { shortlist: () => [{ name: "slow_tool", description: "Slow" }], activateTools: () => {} } as unknown as ToolRouter,
+    { shortlist: () => [{ name: "slow_tool", description: "Slow" }], activateTools: async () => [] } as unknown as ToolRouter,
     { getAvailableSkills: () => [], shortlist: () => [] } as unknown as SkillRouter,
     true
   );
@@ -130,7 +131,7 @@ test("AutoJev uses shared activation threshold for tools and skills", async () =
       { name: "at_cutoff", description: "At cutoff" },
       { name: "below_cutoff", description: "Below cutoff" },
     ],
-    activateTools: (tools: string[]) => activated.push(tools),
+    activateTools: async (tools: string[]) => { activated.push(tools); return tools; },
   } as unknown as ToolRouter;
   const skillRouter = {
     getAvailableSkills: () => [
@@ -167,7 +168,7 @@ test("batched auto and explicit lookup use the same scope-aware skill question",
   const explicit = await skillRouter.findSkills(query);
   const auto = new AutoJev(jevClient, {
     shortlist: () => [{ name: "read", description: "Read files", parameters: {} }],
-    activateTools: () => {},
+    activateTools: async () => [],
   }, skillRouter, true);
   const result = await auto.route(query);
   assert.equal(result.ran, true);
