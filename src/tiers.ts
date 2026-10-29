@@ -90,7 +90,8 @@ export function parseTierOverlay(raw: string): TierOverlay | { error: string } {
     if (typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 5) {
       tier = value as QualityTier;
     } else if (typeof value === "string") {
-      tier = TIER_ALIASES[value.toLowerCase()];
+      const alias = value.toLowerCase();
+      if (Object.hasOwn(TIER_ALIASES, alias)) tier = TIER_ALIASES[alias];
     }
     if (tier === undefined) {
       return { error: `invalid tier for "${key}": expected an integer 1-5 or one of ${Object.keys(TIER_ALIASES).join("/")}, got ${JSON.stringify(value)}` };

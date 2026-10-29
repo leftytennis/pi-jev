@@ -89,6 +89,48 @@ test("AgentOrchestrator dispatches workflowScript through pi-subagents RPC", asy
   assert.match(emittedRequest.params.script, /reviewer/);
 });
 
+test("automatic dispatch requires UI consent before classification and releases the busy flag", async () => {
+  const events: string[] = [];
+  const listeners = new Map<string, (reply: unknown) => void>();
+  const pi: any = {
+    events: {
+      on: (name: string, fn: (reply: unknown) => void) => { listeners.set(name, fn); return () => listeners.delete(name); },
+      emit: (_name: string, payload: { requestId: string }) => {
+        events.push("dispatch");
+        listeners.get(`subagents:rpc:v1:reply:${payload.requestId}`)?.({ success: true, data: { runId: "approved" } });
+      },
+    },
+  };
+  const client = new JevClient();
+  client.isConfigured = () => { events.push("classify"); return false; };
+  const orchestrator = new AgentOrchestrator(pi, client, true);
+  let approve: ((value: boolean) => void) | undefined;
+  const ctx: any = {
+    hasUI: false,
+    ui: {
+      notify: () => {},
+      confirm: () => { events.push("confirm"); return new Promise<boolean>((resolve) => { approve = resolve; }); },
+    },
+  };
+  assert.equal((await orchestrator.dispatch("refactor router", ctx, true)).error, "confirmation unavailable");
+  assert.deepEqual(events, []);
+  ctx.hasUI = true;
+  const declined = orchestrator.dispatch("refactor router", ctx, true);
+  assert.deepEqual(events, ["confirm"]);
+  assert.equal((await orchestrator.dispatch("refactor router", ctx, true)).error, "busy");
+  approve!(false);
+  assert.equal((await declined).error, "declined");
+  assert.deepEqual(events, ["confirm"]);
+  const accepted = orchestrator.dispatch("refactor router", ctx, true);
+  approve!(true);
+  assert.equal((await accepted).accepted, true);
+  assert.deepEqual(events, ["confirm", "confirm", "classify", "dispatch"]);
+  events.length = 0;
+  orchestrator.setEnabled(false);
+  assert.equal((await orchestrator.dispatch("refactor router", ctx, true)).error, "disabled");
+  assert.deepEqual(events, []);
+});
+
 test("generated workflows wrap upstream agent output in untrusted-data markers", () => {
   const script = buildWorkflowScript("Fix race condition", "implementation");
   assert.match(script, /UNTRUSTED SCOUT OUTPUT/);

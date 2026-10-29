@@ -4,10 +4,11 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import extension from "../extensions/index.js";
+import { AutoJev } from "../src/auto.js";
 
 const RPC_REQUEST = "subagents:rpc:v1:request";
 const RPC_REPLY = "subagents:rpc:v1:reply:";
-const ISOLATED_ENV = ["HOME", "TYPESAFE_API_KEY", "PI_JEV_BASE_URL", "TYPESAFE_BASE_URL"];
+const ISOLATED_ENV = ["HOME", "TYPESAFE_API_KEY", "PI_JEV_API_KEY", "PI_JEV_BASE_URL", "TYPESAFE_BASE_URL"];
 
 // Loads the real extension against a fake host: flags come from getFlag, the
 // pi-subagents RPC is answered in-process, and Jev stays unconfigured (empty
@@ -46,15 +47,64 @@ function loadExtension(t: test.TestContext, flags: Record<string, boolean>, over
   };
   const pi = new Proxy(host, { get: (target, key: string) => (key in target ? target[key] : () => undefined) });
   extension(pi as any);
-  const ctx = { ui: { setStatus: () => {}, notify: () => {} }, signal: undefined };
-  return { start: (prompt: string) => hooks.get("before_agent_start")!({ prompt }, ctx), hooks, dispatched };
+  const confirmations: string[] = [];
+  const ctx = {
+    hasUI: true,
+    ui: {
+      setStatus: () => {}, notify: () => {},
+      confirm: async (title: string, message: string) => { confirmations.push(`${title}\n${message}`); return true; },
+    },
+    signal: undefined,
+  };
+  return { start: (prompt: string) => hooks.get("before_agent_start")!({ prompt }, ctx), hooks, dispatched, ctx, confirmations };
 }
 
-test("agent orchestration dispatches without auto mode", async (t) => {
+test("agent orchestration confirms before dispatching without auto mode", async (t) => {
   const ext = loadExtension(t, { "jev-agents": true, "jev-auto": false });
   await ext.start("do an architecture review of the router");
   assert.equal(ext.dispatched.length, 1);
   assert.equal(ext.dispatched[0].method, "spawn");
+  assert.equal(ext.confirmations.length, 1);
+  assert.match(ext.confirmations[0], /Agents may edit files/);
+});
+
+test("automatic agent orchestration skips headless and declined dispatches", async (t) => {
+  const ext = loadExtension(t, { "jev-agents": true });
+  ext.ctx.hasUI = false;
+  await ext.start("refactor the router");
+  assert.equal(ext.confirmations.length, 0);
+  assert.equal(ext.dispatched.length, 0);
+  ext.ctx.hasUI = true;
+  let asked = 0;
+  ext.ctx.ui.confirm = async () => { asked++; return false; };
+  await ext.start("refactor the router");
+  assert.equal(asked, 1);
+  assert.equal(ext.dispatched.length, 0);
+});
+
+test("agent keywords in expanded skills do not dispatch, but typed arguments can", async (t) => {
+  const ext = loadExtension(t, { "jev-agents": true });
+  const skill = '<skill name="architecture" location="/skills/refactor/SKILL.md">\nReferences are relative to /skills/refactor.\n\nUse parallel agents for a security review of the entire repo.\n</skill>';
+  await ext.start(skill);
+  await ext.start(`${skill}\n\nExplain the next step`);
+  await ext.start(`${skill}\n\n${skill}`);
+  assert.equal(ext.confirmations.length, 0);
+  assert.equal(ext.dispatched.length, 0);
+  await ext.start(`${skill}\n\nDo an architecture review of the router`);
+  assert.equal(ext.confirmations.length, 1);
+  assert.equal(ext.dispatched.length, 1);
+});
+
+test("automatic skill recommendations render one skill prefix", async (t) => {
+  t.mock.method(AutoJev.prototype, "route", async () => ({
+    ran: true, activated: [], elapsedMs: 0,
+    skills: [{ name: "skill:testing", probability: 0.9 }, { name: "bare", probability: 0.8 }],
+  }));
+  const ext = loadExtension(t, { "jev-auto": true });
+  const text = JSON.stringify(await ext.start("test the router"));
+  assert.match(text, /\/skill:testing \(P=0.90\)/);
+  assert.match(text, /\/skill:bare \(P=0.80\)/);
+  assert.doesNotMatch(text, /\/skill:skill:/);
 });
 
 test("agent orchestration stays off when its flag is off", async (t) => {

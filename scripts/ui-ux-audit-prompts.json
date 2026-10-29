@@ -1,0 +1,131 @@
+{
+  "_comment": "25 recommended frontend UI/UX audit prompts collected from public prompt libraries, agent-skill repos, and design-tool docs (2026-09-26). Each entry keeps the operative instruction text of the published prompt; placeholder boilerplate ([PRODUCT], {{interface}}, filled example values) is trimmed so the text matches what a user actually sends. `source` is the page the wording came from. One entry (neura-screenshot-analysis) is an image-upload prompt and carries hasImages so the router's vision gate is exercised.",
+  "prompts": [
+    {
+      "id": "pmtly-ux-audit-checklist",
+      "source": "pmtly.com — UX Audit Checklist Generator",
+      "text": "Act as a UX researcher running a heuristic audit. Product: a task manager web app. Surface under review: the project board screen. Primary user goal: move a task from backlog to done. Platform: responsive web. Audit the surface against Nielsen's ten heuristics. For each heuristic give a verdict of pass, minor issue, or blocker, what you observed in one sentence, and the fix, concrete enough to hand to a designer. Then produce a findings table sorted by severity with columns issue, heuristic, severity (blocker/major/minor), effort (S/M/L), and fix. Close with the three fixes that would most improve completion of the primary goal and say what you would measure to prove each one worked. If a heuristic cannot be judged from what I gave you, say so instead of guessing."
+    },
+    {
+      "id": "promptailearning-ux-audit-framework",
+      "source": "promptailearning.com — UX Audit Framework (Claude)",
+      "text": "You are a Senior UX Researcher and Product Designer. Conduct a UX audit of our checkout page. Evaluation categories: 1) Heuristic Evaluation using Nielsen's 10 Usability Heuristics to identify specific issues, 2) Accessibility with a WCAG 2.2 Level AA compliance check, 3) Visual Hierarchy: does the most important information stand out and is the grid consistent, 4) Content Strategy: is the language clear, jargon-free, and consistent, 5) Interaction Design: are transitions smooth and is feedback immediate, 6) Conversion Optimization: are CTAs clear and well-placed and are there friction points in the flow. Deliver a table with Issue, Heuristic Violated, Severity (1-4), and Recommended Fix."
+    },
+    {
+      "id": "ainews-heuristic-evaluation",
+      "source": "ainews.tech — Heuristic evaluation of a screen or flow",
+      "text": "Run a heuristic evaluation of the onboarding flow. Audience: whoever prioritizes UX fixes next sprint. What the user is trying to do: create an account and reach the dashboard with a first project set up. Evaluate against Nielsen's 10 usability heuristics: visibility of system status, match between system and real world, user control and freedom, consistency and standards, error prevention, recognition rather than recall, flexibility and efficiency of use, aesthetic and minimalist design, help users recognize, diagnose, and recover from errors, and help and documentation. For each heuristic give a rating of pass, partial, or fail, the specific violation quoting the exact UI element or flow step, a severity of cosmetic, minor, major, or catastrophic, and a one-sentence fix. End with the top 5 issues ranked by severity times estimated fix effort. Skip heuristics where the flow has no relevant surface; do not manufacture findings."
+    },
+    {
+      "id": "aicraftguide-single-screen-review",
+      "source": "aicraftguide.com — UX Heuristic Review of a Single Screen",
+      "text": "You are a senior UX designer trained on Nielsen's heuristics. Review a single product screen and produce a specific, prioritized list of issues and fixes. Screen role in the user journey: the settings page reached from the account menu. Key actions the user is supposed to take: update their notification preferences and save. Known user complaints: users report they cannot tell whether their changes were saved. Deliver a heuristic-by-heuristic review with concrete recommendations tied to visible elements."
+    },
+    {
+      "id": "promptporter-heuristic-evaluation",
+      "source": "prompt-porter.com — Run a heuristic evaluation",
+      "text": "You are a UX researcher trained in Nielsen's 10 heuristics. Conduct a heuristic evaluation of the mobile app's search results screen. For each heuristic: visibility of system status, match between system and real world, user control and freedom, consistency and standards, error prevention, recognition over recall, flexibility and efficiency, aesthetic and minimalist design, help users recognise and recover from errors, and help and documentation. Per finding give the location, a severity from 0 to 4, the recommended fix, and a screenshot reference or quote. End with a prioritised fix list. Plain English."
+    },
+    {
+      "id": "neura-screenshot-analysis",
+      "source": "neura.market — UI/UX Screenshot Analysis and Rebuild (Gemini)",
+      "text": "Analyze this user interface screenshot and provide: 1. UX Assessment: what's working, what's confusing, what's missing. 2. Accessibility Issues: color contrast, touch target sizes, missing labels, keyboard navigation gaps. 3. Improved Layout: describe a better arrangement with reasoning. 4. Component Specification: for each element give spacing, typography, and color tokens. 5. Implementation: React and Tailwind code for the improved version.",
+      "hasImages": true
+    },
+    {
+      "id": "promptblackmagic-accessibility-audit",
+      "source": "promptblackmagic.com — Accessibility Audit Checklist Generator",
+      "text": "You are a certified accessibility specialist (IAAP CPAC) who has audited products for WCAG 2.2 compliance for government agencies and Fortune 500 companies. Product type: web app. Tech stack: React. Current compliance level: aiming for AA. User base: enterprise. Priority areas: all. Create a complete accessibility audit plan covering automated testing setup with axe-core, Lighthouse, WAVE, and Pa11y including CI integration and common false positives; a manual testing checklist organized by the WCAG principles Perceivable, Operable, Understandable, and Robust; assistive technology testing scripts for VoiceOver, NVDA, JAWS, screen magnifiers, voice control, and switch access; a remediation priority matrix from critical to low; and ongoing compliance checklists for designers, developers, and QA. For each checklist item include the specific WCAG criterion number, how to test it, what passing looks like, and a code example of the fix."
+    },
+    {
+      "id": "tk100x-landing-page-roaster",
+      "source": "tk100x.com — Landing Page Roaster",
+      "text": "You are a Conversion Copy Chief and Landing Page CRO Auditor. Analyze this landing page and produce an expert teardown of copy, layout, CTA hierarchy, trust architecture, and offer clarity, applying StoryBrand principles and direct-response conversion heuristics to identify leaks. Do not provide vague feedback like improve copy; every critique must include evidence, impact, and fix, prioritized by likely conversion impact, with desktop and mobile observations separated. Start with a first-impression diagnostic of what a cold visitor understands in five seconds, then a section-by-section teardown scoring hero, problem agitation, solution, features, social proof, objection handling, pricing, and CTA blocks from 1 to 10, then map the CTA hierarchy and attention leaks, rewrite the hero headline, subhead, primary CTA, social proof block, and risk reversal line, critique the mobile experience, and finish with a 14-day priority roadmap of the top five experiments with expected effect size and measurement method."
+    },
+    {
+      "id": "bigprompthub-phased-design-review",
+      "source": "bigprompthub.com — UI/UX Audit Prompt for Screen-by-Screen Design Review",
+      "text": "You are a premium UI/UX architect. You do not write features or touch functionality. Read the design system, frontend guidelines, app flow, PRD, and tech stack docs, then walk through every screen of the live app at mobile, tablet, and desktop viewports in that order. Review every screen against visual hierarchy, spacing and rhythm, typography, color, alignment and grid, component consistency, iconography, motion and transitions, empty states, loading states, error states, dark mode, density, responsiveness, and accessibility. For every element ask whether a user would need to be told it exists and whether it can be removed without losing meaning. Then compile the findings into a phased plan: Phase 1 Critical, Phase 2 Refinement, Phase 3 Polish, each entry as screen or component, what's wrong, what it should be, and why it matters, followed by required design system token updates and implementation notes precise enough for a build agent to execute without interpretation. Do not implement anything until each phase is approved."
+    },
+    {
+      "id": "wshobson-design-review-command",
+      "source": "github.com/wshobson/agents — ui-design/commands/design-review.md",
+      "text": "Review existing UI code for design issues, usability problems, and improvement opportunities, and provide actionable recommendations. Target: the entire UI directory."
+    },
+    {
+      "id": "promptthisone-comprehensive-ux-audit",
+      "source": "promptthisone.com — Comprehensive UX Audit (ChatGPT)",
+      "text": "Audit the UX of our invoicing feature to surface high-impact usability issues and prioritize fixes that protect key metrics. Produce a clear, severity-ranked table grounded in UX principles with fast, actionable improvements."
+    },
+    {
+      "id": "badalkhatri-master-audit-redesign",
+      "source": "badalkhatri.com — Master Prompt: World-Class UI/UX Audit and Redesign",
+      "text": "You are a world-class SaaS UI/UX designer combining the design quality of Stripe, Linear, Vercel, Notion, Framer, and OpenAI. Audit and redesign my entire application to make it feel premium, modern, minimal but powerful, extremely intuitive, enterprise-ready, visually consistent, and conversion-optimized. The product is a prompt management and version control platform. Audit every screen, including the landing page, sign in, sign up, dashboard, card grid, detail page, version history modal, diff compare view, empty states, search, filters, sidebar navigation, and mobile responsiveness. For each page analyze visual hierarchy, layout and spacing, typography scale, color system, component-level states and micro-interactions, and UX flow improvements. Do not suggest generic advice; be specific and actionable. After auditing everything, provide a design system specification with spacing, radius, shadow, palette, and typography scales, motion guidelines, a dark mode strategy, and a brutally honest assessment of what separates a nine-dollar tool from a forty-nine-dollar tool."
+    },
+    {
+      "id": "aiuxplayground-accessibility-audit-report",
+      "source": "aiuxplayground.com — Accessibility Audit Report",
+      "text": "Document accessibility findings for our web dashboard with severity ratings, WCAG mappings, and remediation guidance. For each finding give the affected component, the WCAG success criterion it fails, who it blocks, the severity, and the specific remediation."
+    },
+    {
+      "id": "aiuxplayground-screen-reader-script",
+      "source": "aiuxplayground.com — Screen Reader Testing Script",
+      "text": "Write a structured test script for evaluating the accessibility of our signup and checkout flows with screen readers. Cover VoiceOver and NVDA, list each step the tester performs, what should be announced, what a pass looks like, and how to record failures."
+    },
+    {
+      "id": "aiuxplayground-i18n-readiness-audit",
+      "source": "aiuxplayground.com — Internationalization Readiness Audit",
+      "text": "Audit our UI copy, layouts, and interactions for internationalization issues such as text truncation, plural forms, right-to-left layout support, date, number, and currency locale formatting, and hard-coded strings. Report each issue with the screen, the problem, the locales affected, and the fix."
+    },
+    {
+      "id": "aiuxplayground-length-expansion-stress-test",
+      "source": "aiuxplayground.com — Length Expansion Stress Test",
+      "text": "Stress-test our key screens for text expansion and identify where the UI breaks with longer translations. Assume German and Finnish strings run 30 to 40 percent longer than English; flag buttons, labels, navigation items, and table headers that will truncate, wrap badly, or overflow, and propose layout fixes."
+    },
+    {
+      "id": "docsbot-landing-page-conversion",
+      "source": "docsbot.ai — Landing Page Conversion prompt",
+      "text": "Create a detailed conversion strategy for transforming our landing page into a high-converting asset. Focus on optimizing the user experience, improving call-to-action effectiveness, and enhancing overall design aesthetics. Conduct a UX audit reviewing navigation, load times, and mobile responsiveness; analyze current CTA performance and propose A/B tests on wording, size, and position; revamp the design to align with brand guidelines; and ensure compliance with accessibility standards such as WCAG. Provide a detailed report in markdown summarizing findings and prioritized changes."
+    },
+    {
+      "id": "vercel-web-design-guidelines",
+      "source": "github.com/vercel-labs/agent-skills — web-design-guidelines skill",
+      "text": "Review this UI code against Web Interface Guidelines and output concise file:line findings to improve accessibility and consistency."
+    },
+    {
+      "id": "tansuasici-visual-consistency-audit",
+      "source": "github.com/tansuasici/claude-code-kit — design-review skill, visual consistency phase",
+      "text": "Run a design review of this application. First inventory the design foundations: check for DESIGN.md, read the Tailwind config, CSS variables, theme files, and design tokens, identify the component library in use, and flag multiple sources of truth. Then audit visual consistency: spacing on a consistent 4px or 8px scale, alignment within and across pages, a hierarchical type scale with purposeful weights and no more than three font families, a cohesive semantic color palette with WCAG AA contrast and no color-only information, and uniform button, input, card, and icon styling with consistent hover, focus, active, and disabled states. Report findings as Critical, Major, and Minor tables with category, location, issue, and fix. Report only; do not modify files."
+    },
+    {
+      "id": "tansuasici-ai-slop-detection",
+      "source": "github.com/tansuasici/claude-code-kit — design-review skill, AI slop detection phase",
+      "text": "Scan this frontend for generic AI-generated design patterns that look templated: uniform border-radius on everything, generic three-column grids of identical cards, overuse of gradients especially blue-to-purple, drop shadows on every element, stock-photo hero sections, dashboard layouts that look like every AI demo, emojis used as icons, perfectly symmetric layouts with no visual hierarchy, and cookie-cutter component styling. For each pattern found give the location and a fix that introduces intentional hierarchy, purposeful color, and visual rhythm."
+    },
+    {
+      "id": "gsd-ui-review-six-pillar",
+      "source": "skillsdirectory.com — gsd-ui-review skill",
+      "text": "Perform a retroactive six-pillar visual audit of the implemented frontend code in this repository, grading hierarchy, spacing, typography, color, component consistency, and responsive behavior, and produce a prioritized list of concrete fixes."
+    },
+    {
+      "id": "microsoft-frontend-design-review",
+      "source": "microsoft/skills — frontend-design-review skill",
+      "text": "Review this UI implementation against our design quality standards and design system compliance. Evaluate the existing UI on the three quality pillars of frictionless, quality craft, and distinctive, identify where components deviate from the design system tokens, and recommend specific changes to reach production-grade quality."
+    },
+    {
+      "id": "mengxuebi-ux-heuristic-skill",
+      "source": "github.com/mengxuebi-mush/ux-heuristic-evaluation — Claude Code skill",
+      "text": "Evaluate this UI using Jakob Nielsen's 10 usability heuristics supplemented by the domain-specific modules that apply to it. Detect the input type, run the evaluation, and produce a structured markdown report with severity ratings, specific findings tied to visible elements, and prioritized actions."
+    },
+    {
+      "id": "jeremylongshore-ux-heuristics-skill",
+      "source": "claudeskills.info — ux-heuristics skill by jeremylongshore",
+      "text": "Users are confused by our multi-step registration form. Run a usability audit and cognitive walkthrough of the form covering Krug's laws, Nielsen's 10 heuristics, severity ratings, dark-pattern recognition, and accessibility, and tell me what is hurting form-completion rates and how to fix it."
+    },
+    {
+      "id": "aiopenlibrary-ux-audit-report",
+      "source": "aiopenlibrary.com — UX Audit and Heuristic Evaluation Report",
+      "text": "You are a senior UX researcher and designer with 15 years of experience. Conduct a thorough UX audit of our B2B analytics product for data analysts, evaluating the main flows of report creation, dashboard sharing, and alert setup using Nielsen's heuristics plus modern usability principles. Known pain points: users abandon report creation midway. Generate an actionable improvement roadmap ranked by impact and effort."
+    }
+  ]
+}

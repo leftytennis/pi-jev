@@ -407,11 +407,17 @@ export function familyOf(id: string): string {
  * about frontier models. Ambiguous phrasing leaves the expensive tier disabled.
  */
 export function requestsFrontierModel(prompt: string): boolean {
+  // Quote removal runs on the whole prompt: every class excludes its own opener, so
+  // an unmatched quote stops at the next quote instead of rescanning to the end.
+  // Only then is the prose bounded; a clause cut by the bound is dropped rather than
+  // read without its (possibly negating) tail.
   const prose = prompt
-    .replace(/```[\s\S]*?(?:```|$)|`[^`]*`|"[^"\n]*"|“[^”]*”/g, " ")
+    .replace(/```[\s\S]*?(?:```|$)|`[^`]*`|"[^"\n]*"|“[^“”]*”/g, " ")
     .replace(/^\s*>.*$/gm, " ");
+  const clauses = prose.slice(0, MAX_TASK_CHARS).split(/[.!;\n]+/);
+  if (prose.length > MAX_TASK_CHARS) clauses.pop();
   const target = /^(?:(?:please|can you|could you)\s+)?(?:use|choose|select|switch to|route (?:this|the task) to|I want (?:you to use|to use))\s+(?:(?:a|the|your)\s+)?(?:frontier(?:-class)? model|flagship model|tier[ -]?5 model)\b/i;
-  return prose.split(/[.!;\n]+/).some((clause) => {
+  return clauses.some((clause) => {
     const text = clause.trim();
     if (/\b(?:not|never|don't|do not|avoid|without|unless|if|instead of)\b/i.test(text)) return false;
     return target.test(text) || /^(?:a )?frontier model(?:,? please)?[?]?$/i.test(text);

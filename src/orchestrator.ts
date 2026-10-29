@@ -198,6 +198,14 @@ export class AgentOrchestrator {
 
     this.running = true;
     try {
+      if (automatic) {
+        if (!ctx.hasUI) return { accepted: false, error: "confirmation unavailable" };
+        const approved = await ctx.ui.confirm(
+          "Start agent orchestration?",
+          "Run a multi-agent workflow for this prompt? Agents may edit files. The main turn will still run."
+        );
+        if (!approved) return { accepted: false, error: "declined" };
+      }
       const topology = await determineTopology(task, this.jevClient, ctx.signal);
       const workflowScript = buildWorkflowScript(task, topology);
 

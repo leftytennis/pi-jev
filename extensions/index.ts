@@ -170,7 +170,9 @@ export default function (pi: ExtensionAPI) {
       ctx.ui.setStatus("jev", routeStatus);
     }
 
-    if (agents.enabled && /\b(architecture|refactor|security review|entire repo|parallel|multiple agents|complex migration)\b/i.test(event.prompt)) {
+    // Pi expands /skill:name into this block before before_agent_start.
+    const userText = event.prompt.replace(/<skill name="[^"]+" location="[^"]+">\n[\s\S]*?\n<\/skill>/g, "");
+    if (agents.enabled && /\b(architecture|refactor|security review|entire repo|parallel|multiple agents|complex migration)\b/i.test(userText)) {
       await agents.dispatch(event.prompt, ctx, true);
     }
 
@@ -194,7 +196,7 @@ export default function (pi: ExtensionAPI) {
         content:
           "Jev auto-matched skill(s) for this task. Load the matching SKILL.md before proceeding:\n" +
           result.skills
-            .map((s) => `• /skill:${s.name} (P=${s.probability.toFixed(2)})`)
+            .map((s) => `• /${s.name.startsWith("skill:") ? s.name : `skill:${s.name}`} (P=${s.probability.toFixed(2)})`)
             .join("\n"),
       },
     };
