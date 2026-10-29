@@ -122,6 +122,8 @@ export class ToolGuard {
     signal?: AbortSignal
   ): Promise<string | null> {
     if (!this.enabled || !this.jevClient.isConfigured()) return null;
+    // Failed calls can contain the same sensitive arguments as successful ones.
+    if (referencesSecretPath(input)) return null;
 
     try {
       const errorText = capText(JSON.stringify(content), MAX_PAYLOAD_CHARS);

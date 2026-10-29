@@ -268,8 +268,11 @@ export async function evaluateGate(options: GateOptions, jevClient?: JevClient):
   });
 
   const answer = response.answers["gate_passed"];
-  const probability = typeof answer?.value === "number" ? answer.value : Number(answer?.value ?? 0);
-  const passed = probability >= threshold;
+  const value = answer?.value;
+  const valid = typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1;
+  const probability = valid ? value : 0;
+  // A zero threshold may accept a real zero judgment, never an absent one.
+  const passed = valid && probability >= threshold;
 
   return {
     passed,

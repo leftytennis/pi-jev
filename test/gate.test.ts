@@ -185,3 +185,14 @@ test("an empty diff fails the gate unless --allow-empty is passed", () => {
     assert.equal(resolveGateState({ criteria: "x", diff: true, allowEmpty: true }), "(empty git diff)");
   });
 });
+
+
+test("a zero threshold cannot pass an absent or malformed judgment", async () => {
+  const client = new JevClient();
+  client.isConfigured = () => true;
+  for (const value of [undefined, "0.9", NaN, -1, 2]) {
+    client.evaluate = async (): Promise<import("../src/types.js").JevEvaluationResponse> => ({ answers: value === undefined ? {} : { gate_passed: { type: "noul", value } }, model: "test", elapsedMs: 0 });
+    const result = await evaluateGate({ criteria: "x", state: "x", threshold: 0, failOpen: true }, client);
+    assert.equal(result.passed, false, String(value));
+  }
+});
