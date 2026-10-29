@@ -407,8 +407,8 @@ export function familyOf(id: string): string {
  * about frontier models. Ambiguous phrasing leaves the expensive tier disabled.
  */
 export function requestsFrontierModel(prompt: string): boolean {
-  const prose = prompt
-    .replace(/```[\s\S]*?(?:```|$)|`[^`]*`|"[^"\n]*"|“[^”]*”/g, " ")
+  const prose = prompt.slice(0, MAX_TASK_CHARS)
+    .replace(/```[\s\S]*?(?:```|$)|`[^`]*`|"[^"\n]*"|“[^“”]*”/g, " ")
     .replace(/^\s*>.*$/gm, " ");
   const target = /^(?:(?:please|can you|could you)\s+)?(?:use|choose|select|switch to|route (?:this|the task) to|I want (?:you to use|to use))\s+(?:(?:a|the|your)\s+)?(?:frontier(?:-class)? model|flagship model|tier[ -]?5 model)\b/i;
   return prose.split(/[.!;\n]+/).some((clause) => {

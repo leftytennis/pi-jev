@@ -113,6 +113,30 @@ test("JevCompactor judges !cmd output instead of keeping it as a user message", 
   assert.doesNotMatch(result.summary, /IGNORE PREVIOUS RULES/);
 });
 
+test("JevCompactor labels retained command and custom output separately from typed user text", needsPi, async () => {
+  const { client, calls } = fakeClient();
+  const result = await new JevCompactor(client, true).compact({
+    preparation: {
+      messagesToSummarize: [
+        user("Only deploy to staging"),
+        bash("cat notes", "command result"),
+        { role: "custom", customType: "test", content: "extension result", display: true, timestamp: 0 },
+        toolResult("t1", "ordinary tool result"),
+      ],
+    },
+  }, {} as any);
+  assert.equal(result.kept, 4);
+  assert.deepEqual(Object.keys(calls[0].questions), ["keep_1", "keep_2", "keep_3"]);
+  assert.match(result.summary, /\[entry 0\] \[User\]: Only deploy to staging/);
+  assert.match(result.summary, /\[entry 1\] \[Command output\]:/);
+  assert.match(result.summary, /\[entry 2\] \[Custom message\]: extension result/);
+  assert.match(result.summary, /\[entry 3\] \[Tool result\]: ordinary tool result/);
+  assert.equal(result.summary.match(/\[User\]:/g)?.length, 1);
+  const state = JSON.stringify(calls[0].state);
+  assert.match(state, /\[Command output\]:/);
+  assert.match(state, /\[Custom message\]:/);
+});
+
 test("JevCompactor defers to pi when !cmd output alone exceeds the entry limit", needsPi, async () => {
   const { client, calls } = fakeClient();
   const messages = Array.from({ length: 200 }, (_, i) => bash(`echo ${i}`, "x".repeat(4_000)));

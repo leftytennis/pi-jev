@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { classifyModelError, classifyModelNeed, AutoModelRouter, describeRouteStatus, parseDurationMs, parseResetHeader, quotaWindowFor, DEFAULT_QUOTA_WINDOW_MS, generationOf, compareGeneration, familyOf, attributeScopes, pressureFromReport, requestsFrontierModel, scopeMatchesModel, applyModelTierPolicy } from "../src/model-router.js";
 import { JevClient } from "../src/jev.js";
 import type { TierTable } from "../src/tiers.js";
+import { MAX_TASK_CHARS } from "../src/limits.js";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -1131,7 +1132,7 @@ test("a tie between the selected profile and another keeps split routing alive r
   }
 });
 
-test("real JevClient normalization keeps missing score answers invalid", async () => {
+test("real JevClient normalization keeps missing score answers invalid", async (t) => {
   const a = model("a", { reasoning: true, contextWindow: 1000000 });
   const b = model("b", { reasoning: true, contextWindow: 200000 });
   const pi: any = { setModel: async () => {} };
@@ -1139,17 +1140,15 @@ test("real JevClient normalization keeps missing score answers invalid", async (
   const jev = new JevClient();
   jev.setApiKey("test-key");
   // Stub only the transport; request formatting and answer normalization run for real.
-  (jev as any).client = {
-    systemOne: async (req: any) => {
-      if (req.questions.profile) {
-        return { answers: { profile: { type: "choice", value: "reasoning", confidence: 0.9, probabilities: { reasoning: 0.9, balanced: 0.1 } } }, model: "jev-latest" };
-      }
-      // Raw answers with no score field at all, as a misbehaving backend might return.
-      return { answers: { fit_0: {}, fit_1: {} }, model: "jev-latest" };
-    },
-  };
-  // The client rebuilds when the active key changes; mark the stub as built for it.
-  (jev as any).clientKey = "test-key";
+  t.mock.method(jev, "getBaseURL", () => null);
+  t.mock.method(globalThis, "fetch", async (_url: unknown, init?: RequestInit) => {
+    const req = JSON.parse(String(init?.body));
+    if (req.questions.profile) {
+      return Response.json({ answers: { profile: { type: "choice", value: "reasoning", confidence: 0.9, probabilities: { reasoning: 0.9, balanced: 0.1 } } }, model: "jev-latest" });
+    }
+    // Raw answers with no score field at all, as a misbehaving backend might return.
+    return Response.json({ answers: { fit_0: {}, fit_1: {} }, model: "jev-latest" });
+  });
   const scored = await jev.evaluate({ state: {}, questions: { fit_0: { type: "score", instructions: "fit", criteria: ["worst", "best"] }, fit_1: { type: "score", instructions: "fit", criteria: ["worst", "best"] } } });
   assert.equal(scored.answers.fit_0.value, undefined, "a missing score must not be normalized into 0");
   const router = new AutoModelRouter(pi, true, jev);
@@ -1360,9 +1359,18 @@ test("frontier opt-in distinguishes routing requests from discussion, quotes, an
     "Review this complex code", "What is a frontier model?", "Compare frontier models",
     "Don't use a frontier model", "Please do not use a frontier model",
     "Never use a frontier model", "Use a frontier model only if necessary",
-    'Explain the phrase "Use a frontier model"', "`Use a frontier model`",
+    'Explain the phrase "Use a frontier model"', "“Use a frontier model”", "`Use a frontier model`",
     "```text\nUse a frontier model\n```", "> Use a frontier model",
   ]) assert.equal(requestsFrontierModel(prompt), false, prompt);
+});
+
+test("frontier opt-in bounds prompt scanning and handles 200 KB of unmatched smart quotes", () => {
+  const prompt = "“a".repeat(100_000);
+  const started = performance.now();
+  assert.equal(requestsFrontierModel(prompt), false);
+  assert.ok(performance.now() - started < 250, "200 KB must finish well under a second");
+  assert.equal(requestsFrontierModel(`${"x".repeat(MAX_TASK_CHARS)}\nUse a frontier model`), false);
+  assert.equal(requestsFrontierModel(`Use a frontier model. ${prompt}`), true);
 });
 
 test("tier policy keeps newest tier 4 per provider family, not the largest cross-provider version", () => {

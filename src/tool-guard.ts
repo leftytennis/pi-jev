@@ -92,7 +92,8 @@ export class ToolGuard {
             },
           },
         },
-        signal
+        signal ? AbortSignal.any([signal, AbortSignal.timeout(3_000)]) : AbortSignal.timeout(3_000),
+        { retry: { maxRetries: 0 } }
       );
 
       const prob = Number(response.answers["is_hallucinated"]?.value ?? 0);
@@ -144,7 +145,8 @@ export class ToolGuard {
             },
           },
         },
-        signal
+        signal ? AbortSignal.any([signal, AbortSignal.timeout(3_000)]) : AbortSignal.timeout(3_000),
+        { retry: { maxRetries: 0 } }
       );
 
       const cause = String(response.answers["error_category"]?.value ?? "");

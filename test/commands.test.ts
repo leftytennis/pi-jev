@@ -29,7 +29,8 @@ function harness(designed: unknown, answers: Record<string, any> = {}) {
 
   const jevClient = {
     isConfigured: () => true,
-    getKeyOrigin: () => "~/.pi/agent/secrets/typesafe_api_key",
+    getKeyOrigin: (): string | null => "~/.pi/agent/secrets/typesafe_api_key",
+    getKeyWarning: (): string | null => null,
     getBaseURL: () => "http://localhost:8000",
     stats: { requestsCount: 0, totalTokens: 0 },
     evaluate: async (request: any) => ({
@@ -40,6 +41,15 @@ function harness(designed: unknown, answers: Record<string, any> = {}) {
     }),
   } as unknown as JevClient;
 
+  const skillRouter = {
+    findSkills: async () => ({
+      recommended: [
+        { name: "skill:testing", description: "Test code", probability: 0.9 },
+        { name: "bare", description: "Legacy skill", probability: 0.8 },
+      ],
+      fallbackUsed: false,
+    }),
+  };
   const auto = {
     enabled: false,
     setEnabled(value: boolean) {
@@ -51,7 +61,7 @@ function harness(designed: unknown, answers: Record<string, any> = {}) {
     pi,
     jevClient,
     {} as ToolRouter,
-    {} as SkillRouter,
+    skillRouter as unknown as SkillRouter,
     auto as unknown as AutoJev
   );
 
@@ -77,6 +87,7 @@ function harness(designed: unknown, answers: Record<string, any> = {}) {
     calls,
     active: () => [...activeTools],
     auto,
+    jevClient,
   };
 }
 
@@ -178,8 +189,34 @@ test("/jev status reports config origin and excludes own tools from the routable
   const status = calls.at(-1)!.message;
   assert.match(status, /Configured: Yes \(from ~\/\.pi\/agent\/secrets\/typesafe_api_key\)/);
   assert.match(status, /Endpoint: http:\/\/localhost:8000/);
+  assert.match(status, /anti-hallucination aid, not a security control/);
+  assert.match(status, /fails open on error or 3s timeout; no retries/);
+  assert.doesNotMatch(status, /Key warning:/);
   // active: read. bash is routable; the three jev tools are ours and must not count.
   assert.match(status, /Active tools: 1 \/ Available: 5 \(1 routable\)/);
+});
+
+test("/jev status reports key warnings and custom endpoint key origins", async () => {
+  const { run, calls, jevClient } = harness({});
+  jevClient.getKeyWarning = () => "~/.pi/agent/secrets/typesafe_api_key is accessible to group or others; run chmod 600";
+  await run("status");
+  assert.match(calls.at(-1)!.message, /Key warning: .*chmod 600/);
+  jevClient.getKeyWarning = () => null;
+  jevClient.getKeyOrigin = () => "$PI_JEV_API_KEY";
+  await run("status");
+  assert.match(calls.at(-1)!.message, /Configured: Yes \(from \$PI_JEV_API_KEY\)/);
+  jevClient.getKeyOrigin = () => null;
+  await run("status");
+  assert.match(calls.at(-1)!.message, /Configured: Yes \(custom endpoint, no API key\)/);
+});
+
+test("/jev skills renders full and bare names with one skill prefix", async () => {
+  const { run, calls } = harness({});
+  await run("skills testing");
+  const text = calls.at(-1)!.message;
+  assert.match(text, /\/skill:testing \(P=0.90\)/);
+  assert.match(text, /\/skill:bare \(P=0.80\)/);
+  assert.doesNotMatch(text, /\/skill:skill:/);
 });
 
 test("/jev enable and /jev disable only touch this extension's tools", async () => {

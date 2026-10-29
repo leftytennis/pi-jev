@@ -60,11 +60,15 @@ export class JevCompactor {
       // Loaded on use: pi's runtime needs Node >= 22.19, while this module is also imported by tooling on older Node.
       const { convertToLlm, serializeConversation } = await import("@earendil-works/pi-coding-agent");
       entries = messages
-        .map((message: any, index: number) => ({
-          index,
-          fromUser: message.role === "user",
-          text: serializeConversation(convertToLlm([message])).trim(),
-        }))
+        .map((message: any, index: number) => {
+          const fromUser = message.role === "user";
+          const text = serializeConversation(convertToLlm([message])).trim();
+          return {
+            index,
+            fromUser,
+            text: fromUser ? text : text.replace(/^\[User\]:/, message.role === "bashExecution" ? "[Command output]:" : "[Custom message]:"),
+          };
+        })
         .filter((entry: Entry) => entry.text);
     } catch {
       return { summary: "", kept: 0, considered: messages.length, skipped: "error" };

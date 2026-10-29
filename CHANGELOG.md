@@ -17,6 +17,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI and publish workflows pin `actions/checkout` and `actions/setup-node` to the v4.4.0 commits, `ci.yml` gets a read-only `permissions` block, and the seven `@earendil-works/*` lockfile entries without integrity hashes now have them.
 - README documents per-feature data egress and an owner-only key-file setup; SECURITY.md gains a data-egress section.
 
+### Changed
+- Custom Jev origins use only `PI_JEV_API_KEY`, or an empty key for unauthenticated servers, never the TypeSafe environment, secrets-file, or in-session key. Endpoint changes rebuild the client; `/jev status` reports the custom key source. (Kimi F-08 / Fable F9.)
+- Automatic agent workflows require UI confirmation before classification or dispatch and stay off without a UI. Keyword matching excludes Pi-expanded skill blocks, while still checking typed skill arguments. (Kimi F-11 / Fable F8.)
+- Both tool-guard evaluations have a 3-second abort deadline and disable SDK retries. `/jev status` and README disclose that the guard fails open and is an anti-hallucination aid, not a security control. (Kimi F-07 / Fable F7.)
+- `/jev status` warns when the TypeSafe secrets file has group or other permissions (`mode & 0o077`), without refusing the key. (Kimi F-13 / Fable F9.)
+
+### Fixed
+- Frontier-request matching excludes both smart quotes from quoted spans and scans at most `MAX_TASK_CHARS` (4,000), avoiding quadratic work on unmatched opening quotes. Added a 200 KB timing regression. (Kimi F-10 / Fable F12.)
+- Skill recommendations in `jev_find_skill`, auto mode, and `/jev skills` render a single `/skill:` prefix while preserving full command names internally.
+- Tier aliases require an own property, rejecting inherited names such as `constructor` and `__proto__`. (Kimi F-16.)
+- Compaction labels retained command output and custom messages separately from typed user turns instead of keeping Pi's serialized `[User]:` prefix.
+
 ## [0.8.0] - 2026-10-07
 
 ### Added
