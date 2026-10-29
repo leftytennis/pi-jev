@@ -1371,6 +1371,16 @@ test("frontier opt-in bounds prompt scanning and handles 200 KB of unmatched sma
   assert.ok(performance.now() - started < 250, "200 KB must finish well under a second");
   assert.equal(requestsFrontierModel(`${"x".repeat(MAX_TASK_CHARS)}\nUse a frontier model`), false);
   assert.equal(requestsFrontierModel(`Use a frontier model. ${prompt}`), true);
+  for (const quoted of ["`", "“", "\n```\n"]) {
+    const spans = quoted === "“" ? ["“", "”"] : [quoted, quoted];
+    assert.equal(requestsFrontierModel(`${spans[0]}Use a frontier model\n${"x".repeat(MAX_TASK_CHARS)}${spans[1]}`), false, `quote closed past the bound: ${JSON.stringify(quoted)}`);
+  }
+  assert.equal(requestsFrontierModel(`Use a frontier model only if ${"x".repeat(MAX_TASK_CHARS)}`), false, "a clause cut by the bound is dropped");
+  assert.equal(requestsFrontierModel(`Use a frontier model.\n${"x".repeat(MAX_TASK_CHARS)}`), true, "a complete directive before the bound still counts");
+  const unmatchedBackticks = "`a ".repeat(70_000);
+  const started2 = performance.now();
+  assert.equal(requestsFrontierModel(unmatchedBackticks), false);
+  assert.ok(performance.now() - started2 < 250, "200 KB of lone backticks must also stay fast");
 });
 
 test("tier policy keeps newest tier 4 per provider family, not the largest cross-provider version", () => {

@@ -98,3 +98,24 @@ test("ToolGuard enhances error results with guidance", async () => {
 
   assert.match(hint ?? "", /Path not found/);
 });
+
+test("ToolGuard's 3 s deadline bounds the real SDK client when the endpoint hangs", async (t) => {
+  const OLD_ENV = { ...process.env };
+  const realFetch = globalThis.fetch;
+  t.after(() => { process.env = { ...OLD_ENV }; globalThis.fetch = realFetch; });
+  process.env.PI_JEV_BASE_URL = "http://127.0.0.1:9";
+  process.env.PI_JEV_API_KEY = "test-key";
+  let requests = 0;
+  // Hang until the SDK's abort signal fires; never resolve on our own.
+  globalThis.fetch = ((_url: any, init?: RequestInit) => new Promise((_resolve, reject) => {
+    requests++;
+    init?.signal?.addEventListener("abort", () => reject(init.signal!.reason), { once: true });
+  })) as typeof fetch;
+  const guard = new ToolGuard({ on: () => {} } as any, new JevClient(), true);
+  const started = performance.now();
+  const result = await guard.checkToolCall("bash", { command: "ls" });
+  const elapsed = performance.now() - started;
+  assert.equal(result.valid, true, "fails open");
+  assert.equal(requests, 1, "no retries");
+  assert.ok(elapsed >= 2_500 && elapsed < 6_000, `bounded by the 3 s deadline, took ${elapsed.toFixed(0)} ms`);
+});
