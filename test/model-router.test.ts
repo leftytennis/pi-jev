@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { classifyModelError, classifyModelNeed, AutoModelRouter, describeRouteStatus, parseDurationMs, parseResetHeader, quotaWindowFor, DEFAULT_QUOTA_WINDOW_MS, generationOf, compareGeneration, familyOf, attributeScopes, pressureFromReport, requestsFrontierModel, scopeMatchesModel, applyModelTierPolicy } from "../src/model-router.js";
+import { classifyModelError, classifyModelNeed, AutoModelRouter, describeRouteStatus, parseDurationMs, parseResetHeader, quotaWindowFor, DEFAULT_QUOTA_WINDOW_MS, generationOf, compareGeneration, familyOf, attributeScopes, pressureFromReport, requestsFrontierModel, scopeMatchesModel, applyModelTierPolicy, inheritPredecessorTiers } from "../src/model-router.js";
 import { JevClient } from "../src/jev.js";
-import type { TierTable } from "../src/tiers.js";
+import { inferTiers, type TierTable } from "../src/tiers.js";
 import { MAX_TASK_CHARS } from "../src/limits.js";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -1610,4 +1610,33 @@ test("malformed Jev fit scoring falls back inside the tier-filtered pool", async
   assert.deepEqual(scored, [[latest.id]]);
   assert.equal(result.model?.id, latest.id);
   assert.match(result.reason, /heuristic scoring/);
+});
+
+test("inheritPredecessorTiers: an unlisted successor takes the newest configured predecessor's tier", () => {
+  const overlay = new Map([
+    ["bridge/claude-fable-5", { tier: 4 as const, basis: "configured" as const }],
+    ["bridge/claude-fable-5-1", { tier: 5 as const, basis: "configured" as const }],
+    ["bridge/claude-opus-5-5", { tier: 4 as const, basis: "configured" as const }],
+  ]);
+  const models = ["claude-fable-5-1", "claude-fable-5-2", "claude-opus-5-5", "claude-opus-6", "claude-haiku-5-5"].map((id) => ({ provider: "bridge", id }));
+  const table = inheritPredecessorTiers(models, inferTiers(models, overlay), overlay);
+  assert.deepEqual(table.get("bridge/claude-fable-5-2"), { tier: 5, basis: "inherited" });
+  assert.deepEqual(table.get("bridge/claude-opus-6"), { tier: 4, basis: "inherited" });
+  assert.deepEqual(table.get("bridge/claude-fable-5-1"), { tier: 5, basis: "configured" });
+  assert.equal(table.get("bridge/claude-haiku-5-5")?.basis, "default");
+});
+
+test("inheritPredecessorTiers: a retired predecessor still positions its successor; other providers do not", () => {
+  const overlay = new Map([["bridge/claude-fable-5-1", { tier: 5 as const, basis: "configured" as const }]]);
+  const models = [{ provider: "bridge", id: "claude-fable-5-2" }, { provider: "other", id: "claude-fable-5-2" }];
+  const table = inheritPredecessorTiers(models, inferTiers(models, overlay), overlay);
+  assert.equal(table.get("bridge/claude-fable-5-2")?.tier, 5);
+  assert.equal(table.get("other/claude-fable-5-2")?.basis, "default");
+});
+
+test("router keeps an inherited tier-5 successor behind the frontier gate", () => {
+  const overlay = new Map([["bridge/claude-fable-5-1", { tier: 5 as const, basis: "configured" as const }]]);
+  const models = [{ provider: "bridge", id: "claude-fable-5-2" }, { provider: "bridge", id: "claude-opus-5-5" }];
+  const tiers = inheritPredecessorTiers(models, inferTiers(models, overlay), overlay);
+  assert.deepEqual(applyModelTierPolicy(models, tiers, false).map((m) => m.id), ["claude-opus-5-5"]);
 });

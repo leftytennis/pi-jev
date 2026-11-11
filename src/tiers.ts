@@ -13,7 +13,11 @@ import * as path from "node:path";
  */
 
 export type QualityTier = 1 | 2 | 3 | 4 | 5;
-export type TierBasis = "configured" | "price-inferred" | "default";
+/**
+ * "inherited": no overlay entry, so the model takes the configured tier of the
+ * newest version it supersedes in its family (fable-5-2 inherits fable-5-1's).
+ */
+export type TierBasis = "configured" | "inherited" | "price-inferred" | "default";
 
 export interface TierAssignment {
   tier: QualityTier;
