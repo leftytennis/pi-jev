@@ -180,6 +180,50 @@ test("renderCatalog: groups models by tier, highest first, with suppressed and e
   ].join("\n"));
 });
 
+test("renderCatalog: a session scope limits the tables and lists what it leaves out", () => {
+  const models = [
+    model({ provider: "bridge", id: "claude-fable-5-1", cost: { input: 0, output: 0 } }),
+    model({ provider: "bridge", id: "claude-fable-5-2", cost: { input: 0, output: 0 } }),
+    model({ provider: "bridge", id: "claude-opus-5-5", cost: { input: 0, output: 0 } }),
+    model({ provider: "metered", id: "gpt-a" }),
+    model({ provider: "metered", id: "gpt-b" }),
+  ];
+  const ctx = {
+    ...catalogCtx(), model: models[2],
+    scopedModels: [models[0], models[2]].map((m) => ({ model: m })),
+    modelRegistry: {
+      getAvailable: () => models,
+      getProviderAuthStatus: () => ({ configured: true, source: "stored" }),
+      getProviderDisplayName: (provider: string) => provider,
+    },
+    sessionManager: { getEntries: () => [] },
+  };
+  const policy = {
+    tiers: new Map([
+      ["bridge/claude-fable-5-1", { tier: 5, basis: "configured" }],
+      ["bridge/claude-fable-5-2", { tier: 5, basis: "inherited" }],
+      ["bridge/claude-opus-5-5", { tier: 4, basis: "configured" }],
+    ]),
+    exclude: new Set<string>(),
+  };
+  const text = renderCatalog(ctx as any, policy as any);
+  assert.match(text, /^Model catalog — 1 provider, 2 models: 1 eligible · 1 frontier only/);
+  assert.match(text, /Outside the session's model scope \(enabledModels \/ --models\) — never routed\n  bridge   claude-fable-5-2\n  metered  all 2 models/);
+  assert.doesNotMatch(text, /Suppressed/);
+});
+
+test("renderCatalog: inherited tiers carry their own marker and legend", () => {
+  const models = [model({ provider: "bridge", id: "claude-fable-5-2", cost: { input: 0, output: 0 } })];
+  const ctx = {
+    ...catalogCtx(), model: undefined,
+    modelRegistry: { getAvailable: () => models, getProviderAuthStatus: () => ({ configured: true }), getProviderDisplayName: (p: string) => p },
+    sessionManager: { getEntries: () => [] },
+  };
+  const text = renderCatalog(ctx as any, { tiers: new Map([["bridge/claude-fable-5-2", { tier: 5, basis: "inherited" }]]), exclude: new Set() } as any);
+  assert.match(text, /claude-fable-5-2 \^/);
+  assert.match(text, /\^ tier inherited from the configured version it supersedes\./);
+});
+
 test("renderCatalog: no policy means per-provider tables without tier sections", () => {
   const text = renderCatalog(catalogCtx() as any);
   assert.doesNotMatch(text, /Tier \d|PROVIDER|Suppressed|Excluded/);

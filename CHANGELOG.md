@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- A model with no tier-file entry inherits the configured tier of the newest version it supersedes in its family. A new release on a zero-priced provider previously fell to tier 3, so a successor to a tier-5 model slipped past the frontier gate.
+- `/jev catalog` builds its tables from the session's model scope, as routing does, and lists the available models the scope leaves out, so a release dropped by an exact-id `enabledModels` list is visible.
+
 ## [0.8.2] - 2026-10-29
 
 ### Publishing

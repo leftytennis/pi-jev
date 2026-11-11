@@ -133,6 +133,8 @@ export interface CatalogContext {
   modelRegistry: CatalogRegistry;
   model?: Model<any>;
   sessionManager: { getEntries(): unknown[] };
+  /** The session's model scope (enabledModels / --models); empty or absent means every available model. */
+  scopedModels?: ReadonlyArray<{ model: Model<any> }>;
 }
 
 type RoutingStatus =
@@ -251,12 +253,15 @@ function renderByTier(models: Model<any>[], providers: ProviderGroup[], policy: 
   const label = (model: Model<any>) => `${model.id}${cells.isCurrent(model) ? " (current)" : ""}`;
 
   let inferredShown = false;
+  let inheritedShown = false;
   let defaultShown = false;
   const modelCell = (model: Model<any>) => {
     const basis = policy.tiers.get(modelKey(model))?.basis ?? "default";
     if (basis === "price-inferred") inferredShown = true;
+    if (basis === "inherited") inheritedShown = true;
     if (basis === "default") defaultShown = true;
-    return `  ${model.id}${basis === "price-inferred" ? " *" : basis === "default" ? " ?" : ""}`;
+    const marker = { configured: "", inherited: " ^", "price-inferred": " *", default: " ?" }[basis];
+    return `  ${model.id}${marker}`;
   };
 
   const routable = shown.filter((model) => kindOf(model) === "eligible" || kindOf(model) === "frontier");
@@ -308,6 +313,7 @@ function renderByTier(models: Model<any>[], providers: ProviderGroup[], policy: 
       `Providers: ${providers.map((group) => `${group.name} (auth: ${group.auth})`).join(" · ")}`,
       [
         "Tiers rank quality from 1 (budget) to 5 (flagship).",
+        ...(inheritedShown ? ["^ tier inherited from the configured version it supersedes."] : []),
         ...(inferredShown ? ["* tier inferred from price, not set in the tier file."] : []),
         ...(defaultShown ? [`? no tier set and no price to infer from; treated as ${DEFAULT_TIER}.`] : []),
       ].join(" "),
@@ -323,18 +329,25 @@ function renderByTier(models: Model<any>[], providers: ProviderGroup[], policy: 
  * configured auth are counted, not listed.
  */
 export function renderCatalog(ctx: CatalogContext, policy?: TierOverlay): string {
-  const models = ctx.modelRegistry.getAvailable();
+  const available = ctx.modelRegistry.getAvailable();
+  // Routing only sees the session scope, so the tables do too; available
+  // models the scope leaves out are listed separately so a new release never
+  // disappears without a trace.
+  const scopeKeys = ctx.scopedModels?.length ? new Set(ctx.scopedModels.map(({ model }) => modelKey(model))) : undefined;
+  const models = scopeKeys ? available.filter((model) => scopeKeys.has(modelKey(model))) : available;
+  const outsideScope = scopeKeys ? available.filter((model) => !scopeKeys.has(modelKey(model))) : [];
   const costs = sessionCosts(ctx.sessionManager.getEntries() as EntrySlice[]);
   const costByKey = new Map(costs.lines.map((line) => [line.key, line]));
   const matchedKeys = new Set<string>();
 
   const grouped = new Map<string, Model<any>[]>();
-  for (const model of models) {
+  for (const model of [...models, ...outsideScope]) {
     const group = grouped.get(model.provider) ?? [];
     group.push(model);
     grouped.set(model.provider, group);
   }
   const providers: ProviderGroup[] = [];
+  const unscoped: { name: string; partial: boolean; models: Model<any>[] }[] = [];
   let unauthenticatedProviders = 0;
   let unauthenticatedModels = 0;
   for (const [provider, group] of [...grouped.entries()].sort(([a], [b]) => a.localeCompare(b))) {
@@ -345,7 +358,11 @@ export function renderCatalog(ctx: CatalogContext, policy?: TierOverlay): string
       continue;
     }
     const auth = status.label ?? status.source ?? "configured";
-    providers.push({ provider, name: ctx.modelRegistry.getProviderDisplayName(provider), auth, models: group });
+    const name = ctx.modelRegistry.getProviderDisplayName(provider);
+    const inScope = scopeKeys ? group.filter((model) => scopeKeys.has(modelKey(model))) : group;
+    if (inScope.length) providers.push({ provider, name, auth, models: inScope });
+    const outside = group.filter((model) => !inScope.includes(model));
+    if (outside.length) unscoped.push({ name, partial: inScope.length > 0, models: outside });
   }
 
   const isCurrent = (model: Model<any>) => ctx.model?.provider === model.provider && ctx.model?.id === model.id;
@@ -365,7 +382,17 @@ export function renderCatalog(ctx: CatalogContext, policy?: TierOverlay): string
       ];
     },
   };
-  const view = policy ? renderByTier(models, providers, policy, cells) : renderByProvider(providers, cells);
+  const view = policy ? renderByTier(providers.flatMap((group) => group.models), providers, policy, cells) : renderByProvider(providers, cells);
+  if (unscoped.length) {
+    // Providers the scope uses but only partly come first: that is where a
+    // new release lands when the scope names models instead of patterns.
+    const scopeLines: Line[] = ["", "Outside the session's model scope (enabledModels / --models) — never routed"];
+    for (const { name, partial, models: list } of [...unscoped].sort((a, b) => Number(b.partial) - Number(a.partial) || a.name.localeCompare(b.name))) {
+      scopeLines.push([`  ${name}`, partial ? list.map((model) => model.id).sort().join(", ") : `all ${plural(list.length, "model")}`]);
+    }
+    view.lines.push(...layout(scopeLines, false));
+    if (view.lines[0] === "") view.lines.shift();
+  }
 
   const shownCount = providers.reduce((n, group) => n + group.models.length, 0);
   const title = `Model catalog — ${plural(providers.length, "provider")}, ${plural(shownCount, "model")}${view.summary ? `: ${view.summary}` : ""}`;

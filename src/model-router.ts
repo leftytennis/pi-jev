@@ -320,7 +320,7 @@ const TIER_GUIDANCE =
   "`quality_tier` ranks the model within its own provider's lineup on the scale 1 (economy) to 5 (flagship); " +
   "it is supplied evidence — use it instead of inferring capability from names, never compare it as an absolute across providers, " +
   "and never let it substitute for a hard requirement (image input, URL input, sufficient context window). " +
-  "`quality_tier_basis` says whether a human configured it or it was inferred from the provider's price ladder. " +
+  "`quality_tier_basis` says whether a human configured it, it was inherited from the configured predecessor it supersedes, or it was inferred from the provider's price ladder. " +
   "Prices reflect vendor capability positioning, not marginal cost: the user is on flat-rate subscriptions, so never optimize for price.";
 
 const MODEL_PROFILE_CRITERIA = {
@@ -459,6 +459,30 @@ export function compareGeneration(a: string, b: string): number {
   return 0;
 }
 
+/**
+ * Give each model without an overlay entry the configured tier of the newest
+ * overlay model it supersedes in the same provider family. Without this, a new
+ * release on a zero-priced provider would fall to DEFAULT_TIER: a successor to
+ * a tier-5 model would slip past the frontier gate and spend frontier quota on
+ * ordinary prompts. Overlay keys count even when that model has left the
+ * registry, so a retired predecessor still positions its successor.
+ */
+export function inheritPredecessorTiers(models: readonly { provider: string; id: string }[], table: TierTable, overlay: TierTable): TierTable {
+  const configured = [...overlay].flatMap(([key, assignment]) => {
+    const slash = key.indexOf("/");
+    return slash > 0 ? [{ provider: key.slice(0, slash), id: key.slice(slash + 1), tier: assignment.tier }] : [];
+  });
+  const result: TierTable = new Map(table);
+  for (const model of models) {
+    if (overlay.has(modelKey(model))) continue;
+    const predecessors = configured.filter((candidate) => supersedes(model, candidate));
+    if (!predecessors.length) continue;
+    predecessors.sort((a, b) => compareGeneration(a.id, b.id));
+    result.set(modelKey(model), { tier: predecessors[0].tier, basis: "inherited" });
+  }
+  return result;
+}
+
 /** The slice of ExtensionContext that tier lookup needs; tooling passes a stub. */
 type TierContext = { modelRegistry: { getAvailable(): Model<any>[] }; ui?: { setStatus?(key: string, text: string): void } };
 
@@ -558,13 +582,16 @@ export class AutoModelRouter {
 
   /**
    * Quality tiers for the current registry lineup, computed once per session:
-   * the overlay wins per model and the provider price ladder fills the rest.
+   * the overlay wins per model, an unlisted successor inherits its configured
+   * predecessor's tier, and the provider price ladder fills the rest.
    * The ladder is always computed from full registry availability, never a
    * scoped pool, so scoping cannot re-rank tiers.
    */
   public tiersFor(ctx: TierContext): TierTable {
     if (this.tierTableCache) return this.tierTableCache;
-    this.tierTableCache = inferTiers(ctx.modelRegistry.getAvailable(), this.overlayFor(ctx).tiers);
+    const available = ctx.modelRegistry.getAvailable();
+    const overlay = this.overlayFor(ctx).tiers;
+    this.tierTableCache = inheritPredecessorTiers(available, inferTiers(available, overlay), overlay);
     return this.tierTableCache;
   }
 
